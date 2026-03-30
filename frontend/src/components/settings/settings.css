@@ -235,7 +235,7 @@
 
 /* Drive info */
 .drive-info {
-  /* no border — last item */
+  border-bottom: none;
 }
 
 .drive-info-title {
