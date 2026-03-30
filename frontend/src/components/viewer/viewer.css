@@ -212,6 +212,70 @@ input[type="color"].hidden-color {
   left: 0 !important;
 }
 
+/* ── Shot labels overlay ── */
+.shot-label {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-family: Arial, sans-serif;
+  font-weight: 700;
+  border: 1.5px solid;
+  border-radius: 3px;
+  padding: 1px 4px;
+  line-height: 1.3;
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.shot-label-num {
+  font-size: 10px;
+}
+
+.shot-label-size {
+  font-size: 9px;
+  opacity: 0.85;
+}
+
+/* ── Canvas context menu ── */
+.canvas-context-menu {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  min-width: 160px;
+}
+
+.ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: var(--color-text);
+}
+
+.ctx-menu-item:hover {
+  background: var(--color-surface-2);
+}
+
+.ctx-menu-danger {
+  color: var(--color-danger) !important;
+}
+
+.ctx-menu-danger:hover {
+  background: rgba(224, 92, 92, 0.1) !important;
+}
+
+
 /* ── Loading overlay ── */
 .viewer-loading {
   position: absolute;

@@ -53,6 +53,10 @@ export default {
         const { handleShots } = await import('./routes/shots')
         return await handleShots(request, env, ctx)
       }
+      if (path.startsWith('/scenes')) {
+        const { handleScenes } = await import('./routes/scenes')
+        return await handleScenes(request, env)
+      }
       if (path.startsWith('/share/')) {
         const { handleShare } = await import('./routes/shots')
         return await handleShare(request, env)

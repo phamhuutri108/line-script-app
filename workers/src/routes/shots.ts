@@ -63,6 +63,14 @@ export async function handleShots(request: Request, env: Env, ctx: ExecutionCont
     const user = await verifyAuth(request, env)
     return updateShot(parts[0], request, user, env, ctx)
   }
+  // DELETE /shots/by-line?lineId=
+  if (request.method === 'DELETE' && parts.length === 0) {
+    const user = await verifyAuth(request, env)
+    const lineId = url.searchParams.get('lineId')
+    if (!lineId) return jsonResponse({ error: 'lineId required' }, 400)
+    await env.DB.prepare('DELETE FROM shots WHERE line_id = ? AND user_id = ?').bind(lineId, user.sub).run()
+    return jsonResponse({ success: true })
+  }
   // DELETE /shots/:id
   if (request.method === 'DELETE' && parts.length === 1) {
     const user = await verifyAuth(request, env)

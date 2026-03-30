@@ -39,7 +39,13 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
     color: '#e05c5c',
   })
   const [shotRefresh, setShotRefresh] = useState(0)
+  const [shots, setShots] = useState<Shot[]>([])
   const [highlightLineId, setHighlightLineId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!token) return
+    shotsApi.list(token, scriptId).then((data) => setShots(data.shots)).catch(() => {})
+  }, [shotRefresh, scriptId, token])
 
   useEffect(() => {
     const loadingTask = pdfjsLib.getDocument({ data: pdfData })
@@ -274,7 +280,10 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
                 scriptId={scriptId}
                 pageNumber={currentPage}
                 toolState={toolState}
+                shots={shots}
                 onLineCreated={extractTextForLine}
+                onLineDeleted={() => setShotRefresh((n) => n + 1)}
+                onSceneMarkersChanged={() => {}}
               />
             )}
           </div>

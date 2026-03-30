@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 
 export interface LineToolState {
-  mode: 'select' | 'draw'
+  mode: 'select' | 'draw' | 'scene'
   lineType: 'solid' | 'dashed'
   color: string
 }
@@ -26,21 +26,34 @@ export default function LineToolbar({ state, onChange }: Props) {
       <button
         className={`tool-btn${state.mode === 'select' ? ' active' : ''}`}
         onClick={() => set({ mode: 'select' })}
-        title="Select (V)"
+        title="Select / Edit (V)"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <path d="M5 3l14 9-7 1-4 7z" />
         </svg>
       </button>
 
-      {/* Draw tool */}
+      {/* Draw shot line tool */}
       <button
         className={`tool-btn${state.mode === 'draw' ? ' active' : ''}`}
         onClick={() => set({ mode: 'draw' })}
-        title="Draw line (L)"
+        title="Draw shot line (L)"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <line x1="12" y1="3" x2="12" y2="21" />
+        </svg>
+      </button>
+
+      {/* Scene marker tool */}
+      <button
+        className={`tool-btn${state.mode === 'scene' ? ' active' : ''}`}
+        onClick={() => set({ mode: 'scene' })}
+        title="Add scene marker (S)"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="8" x2="3" y2="12" />
+          <line x1="8" y1="15" x2="8" y2="12" />
         </svg>
       </button>
 
