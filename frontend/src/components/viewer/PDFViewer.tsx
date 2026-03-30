@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { Link } from 'react-router-dom'
 import ScriptCanvas, { type LineCreatedInfo } from './ScriptCanvas'
 import LineToolbar, { type LineToolState } from './LineToolbar'
@@ -7,8 +8,7 @@ import ShotlistPanel from './ShotlistPanel'
 import { shotsApi, type Shot } from '../../api/shots'
 import { useAuthStore } from '../../stores/authStore'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc =
-  `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
 interface Props {
   pdfData: ArrayBuffer
@@ -47,6 +47,8 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
       pdfDocRef.current = doc
       setNumPages(doc.numPages)
       renderPage(1, zoom, doc)
+    }).catch((err) => {
+      console.error('PDF load error:', err)
     })
     return () => { loadingTask.destroy() }
   }, [pdfData])
