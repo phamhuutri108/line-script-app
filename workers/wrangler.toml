@@ -1,0 +1,21 @@
+name = "line-script-workers"
+main = "src/index.ts"
+compatibility_date = "2024-09-25"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+# JWT_SECRET = set via: wrangler secret put JWT_SECRET
+
+[[d1_databases]]
+binding = "DB"
+database_name = "line-script-db"
+database_id = "9e950483-7356-4023-b23e-58f5211a7128"
+
+[[r2_buckets]]
+binding = "SCRIPTS_BUCKET"
+bucket_name = "line-script-assets"
+
+[dev]
+port = 8787
+local_protocol = "http"

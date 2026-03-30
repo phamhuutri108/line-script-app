@@ -1,0 +1,40 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --color-bg: #0f0f1a;
+  --color-surface: #1a1a2e;
+  --color-surface-2: #242440;
+  --color-border: #2e2e50;
+  --color-primary: #6c63ff;
+  --color-primary-hover: #5a52e0;
+  --color-text: #e8e8f0;
+  --color-text-muted: #8888a8;
+  --color-danger: #e05c5c;
+  --color-success: #5ce08a;
+  --color-warning: #e0c45c;
+  font-size: 16px;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Prevent overscroll on iOS */
+  overscroll-behavior: none;
+}
+
+/* Touch action for canvas areas */
+.canvas-container {
+  touch-action: none;
+}
