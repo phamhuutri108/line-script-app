@@ -42,5 +42,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'pdfjs': ['pdfjs-dist'],
+          'fabric': ['fabric'],
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'zustand': ['zustand'],
+        },
+      },
+    },
   },
 })

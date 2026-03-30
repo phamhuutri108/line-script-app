@@ -1,0 +1,251 @@
+/* ── Viewer shell ── */
+.viewer-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--color-bg);
+  overflow: hidden;
+}
+
+/* ── Top bar ── */
+.viewer-topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+  z-index: 10;
+}
+
+.viewer-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.viewer-script-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.viewer-topbar-center {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.page-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.btn-icon {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.btn-icon:hover:not(:disabled) { background: var(--color-border); }
+.btn-icon:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-icon svg { width: 15px; height: 15px; }
+
+.page-indicator {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  min-width: 70px;
+  text-align: center;
+}
+
+.page-input {
+  width: 42px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 3px 4px;
+  outline: none;
+}
+.page-input:focus { border-color: var(--color-primary); }
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.zoom-value {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  min-width: 38px;
+  text-align: center;
+}
+
+.viewer-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* ── Toolbar (drawing tools) ── */
+.line-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 0.5rem;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  flex-shrink: 0;
+  z-index: 5;
+}
+
+.tool-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  position: relative;
+}
+.tool-btn:hover { background: var(--color-surface-2); color: var(--color-text); }
+.tool-btn.active {
+  background: rgba(108, 99, 255, 0.15);
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+.tool-btn svg { width: 18px; height: 18px; }
+
+.tool-divider {
+  width: 24px;
+  height: 1px;
+  background: var(--color-border);
+  margin: 2px 0;
+}
+
+.color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--color-border);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.color-swatch.active { border-color: var(--color-primary); }
+
+input[type="color"].hidden-color {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ── Viewer body ── */
+.viewer-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Canvas area ── */
+.canvas-area {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1.5rem;
+  background: #2a2a2a;
+  position: relative;
+}
+
+.canvas-wrapper {
+  position: relative;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
+  line-height: 0;
+}
+
+.pdf-canvas {
+  display: block;
+}
+
+.fabric-canvas-el {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+}
+
+/* ── Loading overlay ── */
+.viewer-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: #2a2a2a;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+/* ── Shotlist panel (right) — placeholder for Step 9 ── */
+.shotlist-panel {
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shotlist-panel-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@media (max-width: 900px) {
+  .shotlist-panel { display: none; }
+  .line-toolbar { flex-direction: row; border-right: none; border-top: 1px solid var(--color-border); }
+  .tool-divider { width: 1px; height: 24px; }
+  .viewer-body { flex-direction: column-reverse; }
+  .canvas-area { padding: 0.5rem; }
+}

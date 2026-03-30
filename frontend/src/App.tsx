@@ -7,11 +7,7 @@ import ProtectedRoute from './components/auth/ProtectedRoute'
 import AppLayout from './components/layout/AppLayout'
 import DashboardPage from './components/project/DashboardPage'
 import ProjectDetailPage from './components/project/ProjectDetailPage'
-
-// Placeholders — replaced in upcoming steps
-function ViewerPage() {
-  return <div style={{ padding: '2rem', color: 'white' }}>PDF Viewer — Coming in Step 7</div>
-}
+import ViewerPage from './components/viewer/ViewerPage'
 function AdminPage() {
   return <div style={{ padding: '2rem', color: 'white' }}>Admin — Coming soon</div>
 }
@@ -28,11 +24,16 @@ export default function App() {
         <Route path="/register" element={isAuth ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
         <Route path="/pending" element={<PendingPage />} />
 
-        {/* Protected — all inside AppLayout */}
+        {/* Viewer — fullscreen, no AppLayout */}
+        <Route
+          path="/projects/:id/scripts/:scriptId"
+          element={<ProtectedRoute><ViewerPage /></ProtectedRoute>}
+        />
+
+        {/* Protected — inside AppLayout */}
         <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
-          <Route path="/projects/:id/scripts/:scriptId" element={<ViewerPage />} />
           <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
         </Route>
 
