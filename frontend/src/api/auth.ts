@@ -4,7 +4,7 @@ export interface User {
   id: string
   email: string
   name: string
-  role: 'admin' | 'member' | 'pending'
+  role: 'super_admin' | 'owner' | 'member' | 'pending'
 }
 
 export interface LoginResponse {

@@ -16,7 +16,7 @@ export default function ProtectedRoute({ children, adminOnly = false }: Props) {
   if (user.role === 'pending') {
     return <Navigate to="/pending" replace />
   }
-  if (adminOnly && user.role !== 'admin') {
+  if (adminOnly && user.role !== 'super_admin') {
     return <Navigate to="/dashboard" replace />
   }
 

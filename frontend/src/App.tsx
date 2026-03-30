@@ -4,50 +4,37 @@ import LoginPage from './components/auth/LoginPage'
 import RegisterPage from './components/auth/RegisterPage'
 import PendingPage from './components/auth/PendingPage'
 import ProtectedRoute from './components/auth/ProtectedRoute'
+import AppLayout from './components/layout/AppLayout'
+import DashboardPage from './components/project/DashboardPage'
+import ProjectDetailPage from './components/project/ProjectDetailPage'
 
-// Placeholder — replaced in Step 6
-function DashboardPage() {
-  const { user, clearAuth } = useAuthStore()
-  return (
-    <div style={{ padding: '2rem', color: 'white' }}>
-      <p>Welcome, <strong>{user?.name}</strong> ({user?.role})</p>
-      <button
-        onClick={clearAuth}
-        style={{ marginTop: '1rem', padding: '0.5rem 1rem', cursor: 'pointer' }}
-      >
-        Sign out
-      </button>
-    </div>
-  )
+// Placeholders — replaced in upcoming steps
+function ViewerPage() {
+  return <div style={{ padding: '2rem', color: 'white' }}>PDF Viewer — Coming in Step 7</div>
+}
+function AdminPage() {
+  return <div style={{ padding: '2rem', color: 'white' }}>Admin — Coming soon</div>
 }
 
 export default function App() {
   const { token, user } = useAuthStore()
-  const isAuth = !!token && !!user
+  const isAuth = !!token && !!user && user.role !== 'pending'
 
   return (
     <BrowserRouter>
       <Routes>
-        {/* Public routes — redirect to dashboard if already logged in */}
-        <Route
-          path="/login"
-          element={isAuth && user?.role !== 'pending' ? <Navigate to="/dashboard" replace /> : <LoginPage />}
-        />
-        <Route
-          path="/register"
-          element={isAuth ? <Navigate to="/dashboard" replace /> : <RegisterPage />}
-        />
+        {/* Public */}
+        <Route path="/login" element={isAuth ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
+        <Route path="/register" element={isAuth ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
         <Route path="/pending" element={<PendingPage />} />
 
-        {/* Protected routes */}
-        <Route
-          path="/dashboard"
-          element={
-            <ProtectedRoute>
-              <DashboardPage />
-            </ProtectedRoute>
-          }
-        />
+        {/* Protected — all inside AppLayout */}
+        <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+          <Route path="/dashboard" element={<DashboardPage />} />
+          <Route path="/projects/:id" element={<ProjectDetailPage />} />
+          <Route path="/projects/:id/scripts/:scriptId" element={<ViewerPage />} />
+          <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+        </Route>
 
         {/* Catch-all */}
         <Route path="*" element={<Navigate to={isAuth ? '/dashboard' : '/login'} replace />} />
