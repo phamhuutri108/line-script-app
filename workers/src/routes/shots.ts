@@ -3,21 +3,34 @@ import { jsonResponse, generateId } from '../utils'
 import type { Env } from '../index'
 
 interface ShotBody {
+  // camelCase (from create calls in PDFViewer)
   scriptId?: string
   lineId?: string
   shotNumber?: number
   sceneNumber?: string
-  location?: string
   intExt?: string
   dayNight?: string
+  shotSize?: string
+  scriptTime?: string
+  shotType?: string
+  pageNumber?: number
+  // snake_case (from update calls in ShotlistPanel / ShotlistPage)
+  scene_number?: string
+  int_ext?: string
+  day_night?: string
+  shot_size?: string
+  shot_type?: string
+  script_time?: string
+  // shared (same in both)
+  location?: string
   description?: string
   dialogue?: string
-  shotSize?: string
+  subjects?: string
+  side?: string
   angle?: string
   movement?: string
   lens?: string
   notes?: string
-  pageNumber?: number
 }
 
 export async function handleShots(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -131,18 +144,26 @@ async function createShot(
   const shotNumber = body.shotNumber ?? (lastShot?.max_num ?? 0) + 1
   const id = generateId()
 
+  const sceneNum = body.sceneNumber ?? body.scene_number ?? null
+  const ie = body.intExt ?? body.int_ext ?? null
+  const dn = body.dayNight ?? body.day_night ?? null
+  const ss = body.shotSize ?? body.shot_size ?? null
+  const st = body.shotType ?? body.shot_type ?? null
+  const stime = body.scriptTime ?? body.script_time ?? null
+
   await env.DB.prepare(`
     INSERT INTO shots
       (id, script_id, line_id, user_id, shot_number, scene_number, location,
-       int_ext, day_night, description, dialogue, shot_size, angle, movement, lens, notes, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
+       int_ext, day_night, description, dialogue, subjects, script_time,
+       shot_size, shot_type, side, angle, movement, lens, notes, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, unixepoch())
   `).bind(
     id, body.scriptId, body.lineId ?? null, user.sub, shotNumber,
-    body.sceneNumber ?? null, body.location ?? null,
-    body.intExt ?? null, body.dayNight ?? null,
-    body.description ?? null, body.dialogue ?? null,
-    body.shotSize ?? null, body.angle ?? null,
-    body.movement ?? null, body.lens ?? null, body.notes ?? null,
+    sceneNum, body.location ?? null,
+    ie, dn, body.description ?? null, body.dialogue ?? null,
+    body.subjects ?? null, stime,
+    ss, st, body.side ?? null,
+    body.angle ?? null, body.movement ?? null, body.lens ?? null, body.notes ?? null,
   ).run()
 
   const shot = await env.DB.prepare('SELECT * FROM shots WHERE id = ?').bind(id).first()
@@ -164,6 +185,13 @@ async function updateShot(
   let body: ShotBody
   try { body = await request.json() } catch { return jsonResponse({ error: 'Invalid JSON' }, 400) }
 
+  const uSceneNum = body.sceneNumber ?? body.scene_number ?? null
+  const uIe = body.intExt ?? body.int_ext ?? null
+  const uDn = body.dayNight ?? body.day_night ?? null
+  const uSs = body.shotSize ?? body.shot_size ?? null
+  const uSt = body.shotType ?? body.shot_type ?? null
+  const uStime = body.scriptTime ?? body.script_time ?? null
+
   await env.DB.prepare(`
     UPDATE shots SET
       scene_number = COALESCE(?, scene_number),
@@ -172,7 +200,11 @@ async function updateShot(
       day_night    = COALESCE(?, day_night),
       description  = COALESCE(?, description),
       dialogue     = COALESCE(?, dialogue),
+      subjects     = COALESCE(?, subjects),
+      script_time  = COALESCE(?, script_time),
       shot_size    = COALESCE(?, shot_size),
+      shot_type    = COALESCE(?, shot_type),
+      side         = COALESCE(?, side),
       angle        = COALESCE(?, angle),
       movement     = COALESCE(?, movement),
       lens         = COALESCE(?, lens),
@@ -180,12 +212,12 @@ async function updateShot(
       updated_at   = unixepoch()
     WHERE id = ?
   `).bind(
-    body.sceneNumber ?? null, body.location ?? null,
-    body.intExt ?? null, body.dayNight ?? null,
-    body.description ?? null, body.dialogue ?? null,
-    body.shotSize ?? null, body.angle ?? null,
-    body.movement ?? null, body.lens ?? null,
-    body.notes ?? null, shotId,
+    uSceneNum, body.location ?? null,
+    uIe, uDn, body.description ?? null, body.dialogue ?? null,
+    body.subjects ?? null, uStime,
+    uSs, uSt, body.side ?? null,
+    body.angle ?? null, body.movement ?? null,
+    body.lens ?? null, body.notes ?? null, shotId,
   ).run()
 
   const updated = await env.DB.prepare('SELECT * FROM shots WHERE id = ?').bind(shotId).first()
@@ -273,7 +305,7 @@ async function exportShots(
   const shots = result.results as Record<string, unknown>[]
 
   if (format === 'csv') {
-    const headers = ['shot_number','scene_number','location','int_ext','day_night','description','dialogue','shot_size','angle','movement','lens','notes']
+    const headers = ['shot_number','scene_number','location','int_ext','day_night','description','dialogue','subjects','script_time','shot_size','shot_type','side','angle','movement','lens','notes']
     const rows = shots.map((s) => headers.map((h) => {
       const val = String(s[h] ?? '')
       return val.includes(',') || val.includes('"') || val.includes('\n')

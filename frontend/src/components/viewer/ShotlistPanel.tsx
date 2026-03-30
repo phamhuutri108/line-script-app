@@ -16,6 +16,8 @@ const ANGLE_OPTIONS = ['', 'Eye level', 'Low angle', 'High angle', 'Bird\'s eye'
 const MOVEMENT_OPTIONS = ['', 'Static', 'Pan', 'Tilt', 'Dolly', 'Tracking', 'Handheld', 'Crane', 'Drone']
 const INT_EXT_OPTIONS = ['', 'INT', 'EXT', 'INT/EXT']
 const DAY_NIGHT_OPTIONS = ['', 'DAY', 'NIGHT', 'DAWN', 'DUSK']
+const SHOT_TYPE_OPTIONS = ['', 'Single', 'Two', 'Three', 'Group', 'Observe', 'Insert', 'POV', 'OTS']
+const SIDE_OPTIONS = ['', 'L', 'R', 'L/R']
 
 export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, refreshTrigger }: Props) {
   const { token } = useAuthStore()
@@ -74,10 +76,11 @@ export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, 
   }
 
   function exportCsv() {
-    const headers = ['#', 'Scene', 'Location', 'INT/EXT', 'Day/Night', 'Description', 'Dialogue', 'Size', 'Angle', 'Movement', 'Lens', 'Notes']
+    const headers = ['#', 'Scene', 'Location', 'INT/EXT', 'Day/Night', 'Description', 'Dialogue', 'Subjects', 'Script Time', 'Shot Size', 'Shot Type', 'Side', 'Angle', 'Movement', 'Lens', 'Notes']
     const rows = shots.map((s) => [
       s.shot_number, s.scene_number, s.location, s.int_ext, s.day_night,
-      s.description, s.dialogue, s.shot_size, s.angle, s.movement, s.lens, s.notes,
+      s.description, s.dialogue, s.subjects, s.script_time,
+      s.shot_size, s.shot_type, s.side, s.angle, s.movement, s.lens, s.notes,
     ])
     const csv = [headers, ...rows].map((r) => r.map((v) => {
       const val = String(v ?? '')
@@ -95,7 +98,11 @@ export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, 
       'Day/Night': s.day_night,
       'Description': s.description,
       'Dialogue': s.dialogue,
-      'Size': s.shot_size,
+      'Subjects': s.subjects,
+      'Script Time': s.script_time,
+      'Shot Size': s.shot_size,
+      'Shot Type': s.shot_type,
+      'Side': s.side,
       'Angle': s.angle,
       'Movement': s.movement,
       'Lens': s.lens,
@@ -280,8 +287,14 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
           </div>
           <ShotField label="Description" value={val('description')} onChange={(v) => set('description', v)} multiline />
           <ShotField label="Dialogue" value={val('dialogue')} onChange={(v) => set('dialogue', v)} multiline />
+          <ShotField label="Subjects" value={val('subjects')} onChange={(v) => set('subjects', v)} placeholder="Characters in frame" />
+          <ShotField label="Script Time" value={val('script_time')} onChange={(v) => set('script_time', v)} placeholder="00:30" />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
             <ShotSelect label="Size" options={SHOT_SIZE_OPTIONS} value={val('shot_size')} onChange={(v) => set('shot_size', v)} />
+            <ShotSelect label="Type" options={SHOT_TYPE_OPTIONS} value={val('shot_type')} onChange={(v) => set('shot_type', v)} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+            <ShotSelect label="Side" options={SIDE_OPTIONS} value={val('side')} onChange={(v) => set('side', v)} />
             <ShotSelect label="Angle" options={ANGLE_OPTIONS} value={val('angle')} onChange={(v) => set('angle', v)} />
           </div>
           <ShotSelect label="Movement" options={MOVEMENT_OPTIONS} value={val('movement')} onChange={(v) => set('movement', v)} />

@@ -135,10 +135,16 @@ export default function ProjectDetailPage() {
                       </div>
                       <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
                         <Link
-                          to={`/projects/${id}/scripts/${s.id}`}
+                          to={`/projects/${id}/scripts/${s.id}/viewer`}
                           className="btn btn-secondary btn-sm"
                         >
-                          Open
+                          Line Script
+                        </Link>
+                        <Link
+                          to={`/projects/${id}/scripts/${s.id}/shotlist`}
+                          className="btn btn-secondary btn-sm"
+                        >
+                          Shotlist
                         </Link>
                         {canManage && (
                           <button

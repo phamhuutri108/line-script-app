@@ -8,6 +8,7 @@ import AppLayout from './components/layout/AppLayout'
 import DashboardPage from './components/project/DashboardPage'
 import ProjectDetailPage from './components/project/ProjectDetailPage'
 import ViewerPage from './components/viewer/ViewerPage'
+import ShotlistPage from './components/shotlist/ShotlistPage'
 import AdminPage from './components/admin/AdminPage'
 import InvitePage from './components/auth/InvitePage'
 import SharePage from './components/share/SharePage'
@@ -27,10 +28,19 @@ export default function App() {
         <Route path="/invite/:token" element={<InvitePage />} />
         <Route path="/share/:token" element={<SharePage />} />
 
-        {/* Viewer — fullscreen, no AppLayout */}
+        {/* Viewer & Shotlist — fullscreen, no AppLayout */}
+        <Route
+          path="/projects/:id/scripts/:scriptId/viewer"
+          element={<ProtectedRoute><ViewerPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/projects/:id/scripts/:scriptId/shotlist"
+          element={<ProtectedRoute><ShotlistPage /></ProtectedRoute>}
+        />
+        {/* Legacy redirect for old bookmarks */}
         <Route
           path="/projects/:id/scripts/:scriptId"
-          element={<ProtectedRoute><ViewerPage /></ProtectedRoute>}
+          element={<Navigate to="viewer" replace />}
         />
 
         {/* Protected — inside AppLayout */}

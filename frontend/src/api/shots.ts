@@ -16,6 +16,10 @@ export interface Shot {
   angle: string | null
   movement: string | null
   lens: string | null
+  subjects: string | null
+  script_time: string | null
+  shot_type: string | null
+  side: string | null
   notes: string | null
   storyboard_drive_id: string | null
   storyboard_view_url: string | null
@@ -25,7 +29,8 @@ export interface Shot {
 
 export type ShotUpdate = Partial<Pick<Shot,
   'scene_number' | 'location' | 'int_ext' | 'day_night' |
-  'description' | 'dialogue' | 'shot_size' | 'angle' |
+  'description' | 'dialogue' | 'subjects' | 'script_time' |
+  'shot_size' | 'shot_type' | 'side' | 'angle' |
   'movement' | 'lens' | 'notes' | 'shot_number'
 >>
 
