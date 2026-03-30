@@ -81,7 +81,7 @@ async function handleCallback(url: URL, env: Env): Promise<Response> {
   const error = url.searchParams.get('error')
 
   const frontendBase = env.ENVIRONMENT === 'production'
-    ? 'https://line-script-app.pages.dev'
+    ? 'https://line-script-app.phamhuutri.com'
     : 'http://localhost:5173'
 
   if (error || !code || !state) {
