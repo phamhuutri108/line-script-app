@@ -19,8 +19,6 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false)
-  const [settingUp, setSettingUp] = useState(false)
-  const [setupResult, setSetupResult] = useState<{ sheetsId: string; sheetsUrl: string } | null>(null)
   const [error, setError] = useState('')
   const [successMsg, setSuccessMsg] = useState('')
 
@@ -72,27 +70,11 @@ export default function SettingsPage() {
     try {
       await googleApi.disconnect(token!)
       setStatus({ connected: false, sheetsId: null, driveFolderId: null })
-      setSetupResult(null)
       setSuccessMsg('Đã ngắt kết nối Google.')
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Lỗi')
     } finally {
       setDisconnecting(false)
-    }
-  }
-
-  async function handleSheetsSetup() {
-    setSettingUp(true)
-    setError('')
-    try {
-      const data = await googleApi.sheetsSetup(token!)
-      setSetupResult(data)
-      setStatus((prev) => prev ? { ...prev, sheetsId: data.sheetsId } : prev)
-      setSuccessMsg('Tạo Google Sheet thành công!')
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Lỗi tạo sheet')
-    } finally {
-      setSettingUp(false)
     }
   }
 
@@ -179,39 +161,10 @@ export default function SettingsPage() {
                   <div>
                     <div className="sheets-setup-title">Google Sheets Sync</div>
                     <div className="sheets-setup-desc">
-                      {status.sheetsId
-                        ? 'Đã tạo sheet. Dùng nút "Sync" trong Shotlist Panel để đồng bộ.'
-                        : 'Tạo một Google Sheet mới để đồng bộ shotlist 2 chiều.'}
+                      Để tạo Google Sheet cho một script, vào trang Shotlist và nhấn nút <strong>+ Google Sheet</strong>.
                     </div>
                   </div>
-                  {status.sheetsId ? (
-                    <a
-                      href={`https://docs.google.com/spreadsheets/d/${status.sheetsId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-open-sheet"
-                    >
-                      Mở Sheet ↗
-                    </a>
-                  ) : (
-                    <button
-                      className="btn-setup-sheet"
-                      onClick={handleSheetsSetup}
-                      disabled={settingUp}
-                    >
-                      {settingUp ? 'Đang tạo…' : 'Tạo Spreadsheet'}
-                    </button>
-                  )}
                 </div>
-
-                {setupResult && (
-                  <div className="sheets-created-box">
-                    Sheet đã tạo:{' '}
-                    <a href={setupResult.sheetsUrl} target="_blank" rel="noopener noreferrer">
-                      Mở Google Sheet ↗
-                    </a>
-                  </div>
-                )}
               </div>
 
               {/* Drive info */}
