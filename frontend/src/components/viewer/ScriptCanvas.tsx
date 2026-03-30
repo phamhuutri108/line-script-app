@@ -4,12 +4,21 @@ import { useAuthStore } from '../../stores/authStore'
 import { api } from '../../api/client'
 import type { LineToolState } from './LineToolbar'
 
+export interface LineCreatedInfo {
+  lineId: string
+  xPosition: number
+  yStart: number
+  yEnd: number
+}
+
 interface Props {
   width: number
   height: number
   scriptId: string
   pageNumber: number
   toolState: LineToolState
+  onLineCreated?: (info: LineCreatedInfo) => void
+  onLineDeleted?: (lineId: string) => void
 }
 
 interface LineRecord {
@@ -22,7 +31,7 @@ interface LineRecord {
   setup_number: number | null
 }
 
-export default function ScriptCanvas({ width, height, scriptId, pageNumber, toolState }: Props) {
+export default function ScriptCanvas({ width, height, scriptId, pageNumber, toolState, onLineCreated, onLineDeleted }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const fabricRef = useRef<Canvas | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -139,22 +148,27 @@ export default function ScriptCanvas({ width, height, scriptId, pageNumber, tool
       activeLineRef.current = null
       startPtRef.current = null
 
+      const xNorm = x / width
+      const yStartNorm = yStart / height
+      const yEndNorm = yEnd / height
+
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(async () => {
         try {
-          await api.post(
+          const res = await api.post<{ line: { id: string } }>(
             '/lines',
             {
               scriptId,
               pageNumber,
               lineType: toolState.lineType,
-              xPosition: x / width,
-              yStart: yStart / height,
-              yEnd: yEnd / height,
+              xPosition: xNorm,
+              yStart: yStartNorm,
+              yEnd: yEndNorm,
               color: toolState.color,
             },
             token ?? undefined,
           )
+          onLineCreated?.({ lineId: res.line.id, xPosition: xNorm, yStart: yStartNorm, yEnd: yEndNorm })
         } catch {
           // Saved locally on canvas — API sync will retry on reload
         }
@@ -182,7 +196,12 @@ export default function ScriptCanvas({ width, height, scriptId, pageNumber, tool
       const canvas = fabricRef.current
       if (!canvas) return
       const active = canvas.getActiveObject()
-      if (active) { canvas.remove(active); canvas.requestRenderAll() }
+      if (active) {
+        const lineId = (active as { data?: { id?: string } }).data?.id
+        canvas.remove(active)
+        canvas.requestRenderAll()
+        if (lineId) onLineDeleted?.(lineId)
+      }
     }
     window.addEventListener('keydown', handleKey)
     return () => window.removeEventListener('keydown', handleKey)

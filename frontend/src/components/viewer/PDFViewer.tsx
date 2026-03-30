@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { Link } from 'react-router-dom'
-import ScriptCanvas from './ScriptCanvas'
+import ScriptCanvas, { type LineCreatedInfo } from './ScriptCanvas'
 import LineToolbar, { type LineToolState } from './LineToolbar'
+import ShotlistPanel from './ShotlistPanel'
+import { shotsApi, type Shot } from '../../api/shots'
+import { useAuthStore } from '../../stores/authStore'
 
-// Use CDN worker to avoid bundler complexity
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
 interface Props {
   pdfData: ArrayBuffer
@@ -22,6 +25,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
   const renderTaskRef = useRef<pdfjsLib.RenderTask | null>(null)
+  const { token } = useAuthStore()
 
   const [numPages, setNumPages] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
@@ -34,8 +38,9 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
     lineType: 'solid',
     color: '#e05c5c',
   })
+  const [shotRefresh, setShotRefresh] = useState(0)
+  const [highlightLineId, setHighlightLineId] = useState<string | null>(null)
 
-  // Load PDF document once
   useEffect(() => {
     const loadingTask = pdfjsLib.getDocument({ data: pdfData })
     loadingTask.promise.then((doc) => {
@@ -46,48 +51,123 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
     return () => { loadingTask.destroy() }
   }, [pdfData])
 
-  // Re-render when page or zoom changes
   useEffect(() => {
-    if (pdfDocRef.current) {
-      renderPage(currentPage, zoom, pdfDocRef.current)
-    }
+    if (pdfDocRef.current) renderPage(currentPage, zoom, pdfDocRef.current)
   }, [currentPage, zoom])
 
   const renderPage = useCallback(async (
-    pageNum: number,
-    scale: number,
-    doc: pdfjsLib.PDFDocumentProxy,
+    pageNum: number, scale: number, doc: pdfjsLib.PDFDocumentProxy,
   ) => {
     if (!pdfCanvasRef.current) return
-
-    // Cancel any ongoing render
-    if (renderTaskRef.current) {
-      renderTaskRef.current.cancel()
-    }
-
+    if (renderTaskRef.current) renderTaskRef.current.cancel()
     setRendering(true)
     try {
       const page = await doc.getPage(pageNum)
       const viewport = page.getViewport({ scale })
-
       const canvas = pdfCanvasRef.current
       const ctx = canvas.getContext('2d')!
-
       canvas.width = viewport.width
       canvas.height = viewport.height
       setCanvasSize({ width: viewport.width, height: viewport.height })
-
-      const renderTask = page.render({ canvasContext: ctx, viewport })
-      renderTaskRef.current = renderTask
-      await renderTask.promise
+      const task = page.render({ canvasContext: ctx, viewport })
+      renderTaskRef.current = task
+      await task.promise
     } catch (err: unknown) {
-      if ((err as Error).message !== 'Rendering cancelled') {
-        console.error('PDF render error', err)
-      }
+      if ((err as Error).message !== 'Rendering cancelled') console.error(err)
     } finally {
       setRendering(false)
     }
   }, [])
+
+  // Extract text in y-range from current page, build shot data
+  const extractTextForLine = useCallback(async (info: LineCreatedInfo) => {
+    const doc = pdfDocRef.current
+    if (!doc || !token) return
+
+    try {
+      const page = await doc.getPage(currentPage)
+      const textContent = await page.getTextContent()
+      const viewport = page.getViewport({ scale: 1 })
+
+      type TextItem = { str: string; transform: number[] }
+      const items = (textContent.items as TextItem[]).filter(
+        (item) => item.transform && item.str.trim()
+      )
+
+      // Normalize y coords (PDF y is bottom-up, flip to top-down)
+      const inRange = items.filter((item) => {
+        const yNorm = 1 - item.transform[5] / viewport.height
+        return yNorm >= info.yStart && yNorm <= info.yEnd
+      })
+
+      // Detect scene header: starts with INT. / EXT. / INT/EXT
+      const sceneHeader = inRange.find((item) =>
+        /^(INT\.|EXT\.|INT\/EXT)/i.test(item.str.trim())
+      )
+
+      let sceneNumber: string | undefined
+      let location: string | undefined
+      let intExt: string | undefined
+      let dayNight: string | undefined
+
+      if (sceneHeader) {
+        // Format: "INT. LOCATION - DAY" or "EXT. LOCATION - NIGHT"
+        const match = sceneHeader.str.match(/^(INT\.|EXT\.|INT\/EXT\.?)\s+(.+?)\s*[-–]\s*(DAY|NIGHT|DAWN|DUSK)/i)
+        if (match) {
+          intExt = match[1].replace('.', '').toUpperCase()
+          location = match[2].trim()
+          dayNight = match[3].toUpperCase()
+        }
+        // Try to find scene number before the header (e.g. "1." or "A1")
+        const prevItems = items.filter((item) => {
+          const yNorm = 1 - item.transform[5] / viewport.height
+          return yNorm >= info.yStart - 0.02 && yNorm < info.yStart + 0.02
+        })
+        const sceneNumItem = prevItems.find((item) => /^\d+[A-Z]?\.?$/.test(item.str.trim()))
+        if (sceneNumItem) sceneNumber = sceneNumItem.str.trim().replace('.', '')
+      }
+
+      // Dialogue: text in center column (x between 25%-75% of page)
+      const dialogue = inRange
+        .filter((item) => {
+          const xNorm = item.transform[4] / viewport.width
+          return xNorm > 0.25 && xNorm < 0.75
+        })
+        .map((item) => item.str)
+        .join(' ')
+        .trim()
+
+      // Description: action lines (left aligned, not scene header)
+      const description = inRange
+        .filter((item) => {
+          const xNorm = item.transform[4] / viewport.width
+          return xNorm < 0.25 && item !== sceneHeader
+        })
+        .map((item) => item.str)
+        .join(' ')
+        .trim()
+
+      await shotsApi.create(token, {
+        scriptId,
+        lineId: info.lineId,
+        sceneNumber,
+        location,
+        intExt,
+        dayNight,
+        description: description || undefined,
+        dialogue: dialogue || undefined,
+        pageNumber: currentPage,
+      })
+
+      setShotRefresh((n) => n + 1)
+    } catch {
+      // Text extraction failed — shot still created with empty fields
+      try {
+        await shotsApi.create(token, { scriptId, lineId: info.lineId, pageNumber: currentPage })
+        setShotRefresh((n) => n + 1)
+      } catch { /* ignore */ }
+    }
+  }, [currentPage, scriptId, token])
 
   function goToPage(p: number) {
     const clamped = Math.max(1, Math.min(numPages, p))
@@ -105,14 +185,17 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
   function zoomIn() { setZoom((z) => Math.min(ZOOM_MAX, Math.round((z + ZOOM_STEP) * 4) / 4)) }
   function zoomOut() { setZoom((z) => Math.max(ZOOM_MIN, Math.round((z - ZOOM_STEP) * 4) / 4)) }
   function fitWidth() {
-    if (!pdfCanvasRef.current?.parentElement) return
-    const containerWidth = pdfCanvasRef.current.parentElement.clientWidth - 48
-    if (pdfDocRef.current) {
-      pdfDocRef.current.getPage(currentPage).then((page) => {
-        const vp = page.getViewport({ scale: 1 })
-        setZoom(Math.min(ZOOM_MAX, containerWidth / vp.width))
-      })
-    }
+    const container = pdfCanvasRef.current?.parentElement
+    if (!container || !pdfDocRef.current) return
+    pdfDocRef.current.getPage(currentPage).then((page) => {
+      const vp = page.getViewport({ scale: 1 })
+      setZoom(Math.min(ZOOM_MAX, (container.clientWidth - 48) / vp.width))
+    })
+  }
+
+  function handleShotClick(shot: Shot) {
+    setHighlightLineId(shot.line_id)
+    // Navigate to the page the shot is on (future enhancement)
   }
 
   return (
@@ -120,11 +203,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
       {/* Top bar */}
       <div className="viewer-topbar">
         <div className="viewer-topbar-left">
-          <Link
-            to={`/projects/${projectId}`}
-            className="btn-icon"
-            title="Back to project"
-          >
+          <Link to={`/projects/${projectId}`} className="btn-icon" title="Back">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <polyline points="15 18 9 12 15 6" />
             </svg>
@@ -133,18 +212,12 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
         </div>
 
         <div className="viewer-topbar-center">
-          {/* Page navigation */}
           <div className="page-nav">
             <button className="btn-icon" onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <polyline points="15 18 9 12 15 6" />
-              </svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="15 18 9 12 15 6" /></svg>
             </button>
             <input
-              className="page-input"
-              type="number"
-              min={1}
-              max={numPages}
+              className="page-input" type="number" min={1} max={numPages}
               value={pageInputVal}
               onChange={(e) => setPageInputVal(e.target.value)}
               onKeyDown={handlePageInput}
@@ -152,15 +225,12 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
             />
             <span className="page-indicator">/ {numPages}</span>
             <button className="btn-icon" onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= numPages}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><polyline points="9 18 15 12 9 6" /></svg>
             </button>
           </div>
         </div>
 
         <div className="viewer-topbar-right">
-          {/* Zoom controls */}
           <div className="zoom-controls">
             <button className="btn-icon" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} title="Zoom out">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
@@ -187,21 +257,14 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
 
       {/* Body */}
       <div className="viewer-body">
-        {/* Drawing toolbar */}
         <LineToolbar state={toolState} onChange={setToolState} />
 
-        {/* Canvas area */}
         <div className="canvas-area">
           {rendering && canvasSize.width === 0 && (
-            <div className="viewer-loading">
-              <div className="spinner" />
-              Rendering page…
-            </div>
+            <div className="viewer-loading"><div className="spinner" />Rendering page…</div>
           )}
-
           <div className="canvas-wrapper" style={{ width: canvasSize.width, height: canvasSize.height }}>
             <canvas ref={pdfCanvasRef} className="pdf-canvas" />
-
             {canvasSize.width > 0 && (
               <ScriptCanvas
                 width={canvasSize.width}
@@ -209,20 +272,18 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
                 scriptId={scriptId}
                 pageNumber={currentPage}
                 toolState={toolState}
+                onLineCreated={extractTextForLine}
               />
             )}
           </div>
         </div>
 
-        {/* Shotlist panel placeholder */}
-        <div className="shotlist-panel">
-          <div className="shotlist-panel-header">
-            <span>Shotlist</span>
-          </div>
-          <div style={{ padding: '1rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
-            Shotlist panel — coming in Step 9
-          </div>
-        </div>
+        <ShotlistPanel
+          scriptId={scriptId}
+          highlightLineId={highlightLineId}
+          onShotClick={handleShotClick}
+          refreshTrigger={shotRefresh}
+        />
       </div>
     </div>
   )
