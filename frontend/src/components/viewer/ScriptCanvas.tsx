@@ -42,7 +42,7 @@ export default function ScriptCanvas({ width, height, scriptId, pageNumber, tool
 
   // Stable helper to get canvas-relative point from native event
   function getPoint(e: MouseEvent | PointerEvent, canvas: Canvas): { x: number; y: number } {
-    const rect = canvas.getElement().getBoundingClientRect()
+    const rect = canvas.upperCanvasEl.getBoundingClientRect()
     return { x: e.clientX - rect.left, y: e.clientY - rect.top }
   }
 
@@ -175,16 +175,20 @@ export default function ScriptCanvas({ width, height, scriptId, pageNumber, tool
       }, 500)
     }
 
-    el.addEventListener('pointerdown', onPointerDown)
-    el.addEventListener('pointermove', onPointerMove)
-    el.addEventListener('pointerup', onPointerUp)
-    el.addEventListener('pointercancel', onPointerUp)
+    // Attach to upperCanvasEl — Fabric places upperCanvas on top of lowerCanvas,
+    // so pointer events on el (lowerCanvas) are blocked by upperCanvas
+    const targetEl = fabricRef.current?.upperCanvasEl ?? el
+
+    targetEl.addEventListener('pointerdown', onPointerDown)
+    targetEl.addEventListener('pointermove', onPointerMove)
+    targetEl.addEventListener('pointerup', onPointerUp)
+    targetEl.addEventListener('pointercancel', onPointerUp)
 
     return () => {
-      el.removeEventListener('pointerdown', onPointerDown)
-      el.removeEventListener('pointermove', onPointerMove)
-      el.removeEventListener('pointerup', onPointerUp)
-      el.removeEventListener('pointercancel', onPointerUp)
+      targetEl.removeEventListener('pointerdown', onPointerDown)
+      targetEl.removeEventListener('pointermove', onPointerMove)
+      targetEl.removeEventListener('pointerup', onPointerUp)
+      targetEl.removeEventListener('pointercancel', onPointerUp)
     }
   }, [toolState, scriptId, pageNumber, token, width, height])
 

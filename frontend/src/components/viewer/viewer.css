@@ -204,6 +204,14 @@ input[type="color"].hidden-color {
   left: 0;
 }
 
+/* Fabric wraps the canvas in .canvas-container (position:relative by default) —
+   must be absolute so it overlays the PDF canvas, not stacks below it */
+.canvas-wrapper .canvas-container {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+}
+
 /* ── Loading overlay ── */
 .viewer-loading {
   position: absolute;
