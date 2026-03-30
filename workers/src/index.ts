@@ -41,6 +41,10 @@ export default {
         const { handleAnnotations } = await import('./routes/annotations')
         return await handleAnnotations(request, env)
       }
+      if (path.startsWith('/invite')) {
+        const { handleInvite } = await import('./routes/invite')
+        return await handleInvite(request, env)
+      }
       if (path.startsWith('/shots')) {
         const { handleShots } = await import('./routes/shots')
         return await handleShots(request, env)

@@ -8,9 +8,9 @@ import AppLayout from './components/layout/AppLayout'
 import DashboardPage from './components/project/DashboardPage'
 import ProjectDetailPage from './components/project/ProjectDetailPage'
 import ViewerPage from './components/viewer/ViewerPage'
-function AdminPage() {
-  return <div style={{ padding: '2rem', color: 'white' }}>Admin — Coming soon</div>
-}
+import AdminPage from './components/admin/AdminPage'
+import InvitePage from './components/auth/InvitePage'
+import SharePage from './components/share/SharePage'
 
 export default function App() {
   const { token, user } = useAuthStore()
@@ -23,6 +23,8 @@ export default function App() {
         <Route path="/login" element={isAuth ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
         <Route path="/register" element={isAuth ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
         <Route path="/pending" element={<PendingPage />} />
+        <Route path="/invite/:token" element={<InvitePage />} />
+        <Route path="/share/:token" element={<SharePage />} />
 
         {/* Viewer — fullscreen, no AppLayout */}
         <Route
