@@ -177,14 +177,14 @@ async function sheetsSetup(request: Request, userId: string, env: Env): Promise<
   if (!createRes.ok) return jsonResponse({ error: 'Failed to create spreadsheet' }, 500)
   const sheet = await createRes.json() as { spreadsheetId: string; spreadsheetUrl: string }
 
-  // Add header row
+  // Add header row (17 columns: A–Q)
   await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${sheet.spreadsheetId}/values/Shotlist!A1:N1?valueInputOption=RAW`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${sheet.spreadsheetId}/values/Shotlist!A1:Q1?valueInputOption=RAW`,
     {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        values: [['#', 'Cảnh', 'Địa điểm', 'INT/EXT', 'Ngày/Đêm', 'Mô tả', 'Thoại', 'Góc máy', 'Kích thước', 'Di chuyển', 'Ống kính', 'Ghi chú', 'Storyboard']],
+        values: [['#', 'Cảnh', 'Địa điểm', 'INT/EXT', 'Ngày/Đêm', 'Mô tả', 'Thoại', 'Nhân vật', 'Thời lượng', 'Cỡ cảnh', 'Loại cảnh', 'Phía', 'Góc máy', 'Di chuyển', 'Ống kính', 'Ghi chú', 'Storyboard']],
       }),
     }
   )
@@ -220,13 +220,15 @@ async function syncAll(request: Request, userId: string, env: Env): Promise<Resp
   const rows = shots.results.map((s: Record<string, unknown>) => [
     s.shot_number, s.scene_number ?? '', s.location ?? '',
     s.int_ext ?? '', s.day_night ?? '', s.description ?? '',
-    s.dialogue ?? '', s.angle ?? '', s.shot_size ?? '',
-    s.movement ?? '', s.lens ?? '', s.notes ?? '',
+    s.dialogue ?? '', s.subjects ?? '', s.script_time ?? '',
+    s.shot_size ?? '', s.shot_type ?? '', s.side ?? '',
+    s.angle ?? '', s.movement ?? '', s.lens ?? '',
+    s.notes ?? '',
     s.storyboard_view_url ? `=IMAGE("${s.storyboard_view_url}")` : '',
   ])
 
   await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${gtRecord.sheets_id}/values/Shotlist!A2:M${shots.results.length + 1}?valueInputOption=USER_ENTERED`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${gtRecord.sheets_id}/values/Shotlist!A2:Q${shots.results.length + 1}?valueInputOption=USER_ENTERED`,
     {
       method: 'PUT',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

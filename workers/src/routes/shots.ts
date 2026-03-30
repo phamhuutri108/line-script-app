@@ -256,9 +256,9 @@ async function autoSync(scriptId: string, userId: string, env: Env): Promise<voi
       'SELECT * FROM shots WHERE script_id = ? AND user_id = ? ORDER BY shot_number ASC'
     ).bind(scriptId, userId).all()
 
-    // Clear existing data rows
+    // Clear existing data rows (correct Sheets API clear endpoint)
     await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A2:M1000:clear`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A2:R1000:clear`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -268,16 +268,31 @@ async function autoSync(scriptId: string, userId: string, env: Env): Promise<voi
 
     if (shots.results.length === 0) return
 
+    // Columns: #, Scene, Location, INT/EXT, D/N, Description, Dialogue,
+    //          Subjects, Script Time, Shot Size, Shot Type, Side,
+    //          Angle, Movement, Lens, Notes, Storyboard (17 cols → A:Q)
     const rows = shots.results.map((s: Record<string, unknown>) => [
-      s.shot_number, s.scene_number ?? '', s.location ?? '',
-      s.int_ext ?? '', s.day_night ?? '', s.description ?? '',
-      s.dialogue ?? '', s.angle ?? '', s.shot_size ?? '',
-      s.movement ?? '', s.lens ?? '', s.notes ?? '',
+      s.shot_number,
+      s.scene_number ?? '',
+      s.location ?? '',
+      s.int_ext ?? '',
+      s.day_night ?? '',
+      s.description ?? '',
+      s.dialogue ?? '',
+      s.subjects ?? '',
+      s.script_time ?? '',
+      s.shot_size ?? '',
+      s.shot_type ?? '',
+      s.side ?? '',
+      s.angle ?? '',
+      s.movement ?? '',
+      s.lens ?? '',
+      s.notes ?? '',
       s.storyboard_view_url ? `=IMAGE("${s.storyboard_view_url}")` : '',
     ])
 
     await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A2:M${shots.results.length + 1}?valueInputOption=USER_ENTERED`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A2:Q${shots.results.length + 1}?valueInputOption=USER_ENTERED`,
       {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
