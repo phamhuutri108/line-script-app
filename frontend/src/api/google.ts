@@ -1,5 +1,10 @@
 import { api } from './client'
 
+export interface DriveFolder {
+  id: string
+  name: string
+}
+
 export const googleApi = {
   getAuthUrl: (token: string) =>
     api.get<{ url: string }>('/google/auth-url', token),
@@ -12,9 +17,19 @@ export const googleApi = {
   disconnect: (token: string) =>
     api.delete<{ success: boolean }>('/google/disconnect', token),
 
-  sheetsSetup: (token: string, scriptName?: string) =>
-    api.post<{ sheetsId: string; sheetsUrl: string }>(
-      '/google/sheets/setup', { scriptName }, token,
+  getDriveFolders: (token: string) =>
+    api.get<{ folders: DriveFolder[] }>('/google/drive/folders', token),
+
+  sheetsSetup: (token: string, data: {
+    scriptId: string
+    folderId?: string
+    abbrev: string
+    projectName: string
+    versionType: 'draft' | 'final'
+    versionNum?: string
+  }) =>
+    api.post<{ sheetsId: string; sheetsUrl: string; title: string }>(
+      '/google/sheets/setup', data, token,
     ),
 
   syncAll: (token: string, scriptId: string) =>

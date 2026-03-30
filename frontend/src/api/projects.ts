@@ -25,6 +25,8 @@ export interface Script {
   page_count: number | null
   uploaded_by?: string
   created_at: number
+  sheets_id?: string | null
+  sheets_url?: string | null
 }
 
 export const projectsApi = {

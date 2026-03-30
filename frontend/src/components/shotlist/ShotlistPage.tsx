@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { shotsApi, type Shot, type ShotUpdate } from '../../api/shots'
-import { scriptsApi, type Script } from '../../api/projects'
+import { scriptsApi, projectsApi, type Script } from '../../api/projects'
+import { googleApi, type DriveFolder } from '../../api/google'
 import { ApiError } from '../../api/client'
 import * as XLSX from 'xlsx'
 import './shotlist.css'
@@ -20,26 +21,45 @@ export default function ShotlistPage() {
   const { token } = useAuthStore()
   const [shots, setShots] = useState<Shot[]>([])
   const [script, setScript] = useState<Script | null>(null)
+  const [projectName, setProjectName] = useState('')
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [shareUrl, setShareUrl] = useState('')
   const [sharing, setSharing] = useState(false)
+  const [googleConnected, setGoogleConnected] = useState(false)
+  const [showSheetsModal, setShowSheetsModal] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   useEffect(() => { loadData() }, [scriptId])
 
   async function loadData() {
     setLoading(true)
     try {
-      const [scriptsRes, shotsRes] = await Promise.all([
+      const [scriptsRes, shotsRes, projectRes, googleRes] = await Promise.all([
         scriptsApi.list(token!, projectId!),
         shotsApi.list(token!, scriptId!),
+        projectsApi.get(token!, projectId!),
+        googleApi.getStatus(token!),
       ])
       setScript(scriptsRes.scripts.find((s) => s.id === scriptId) ?? null)
       setShots(shotsRes.shots)
+      setProjectName(projectRes.project.name)
+      setGoogleConnected(googleRes.connected)
     } catch {
       // silent
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handleSyncAll() {
+    setSyncing(true)
+    try {
+      await googleApi.syncAll(token!, scriptId!)
+    } catch {
+      alert('Sync failed')
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -154,8 +174,48 @@ export default function ShotlistPage() {
             </svg>
             Share
           </button>
+
+          {/* ── Sheets ── */}
+          {!googleConnected && (
+            <Link to="/settings" className="sl-action-btn sl-sheets-btn" title="Connect Google to use Sheets">
+              Google Sheets
+            </Link>
+          )}
+          {googleConnected && !script?.sheets_id && (
+            <button className="sl-action-btn sl-sheets-btn" onClick={() => setShowSheetsModal(true)}>
+              + Google Sheet
+            </button>
+          )}
+          {googleConnected && script?.sheets_id && (
+            <>
+              <a
+                className="sl-action-btn sl-sheets-btn"
+                href={script.sheets_url ?? `https://docs.google.com/spreadsheets/d/${script.sheets_id}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Sheet ↗
+              </a>
+              <button className="sl-action-btn" onClick={handleSyncAll} disabled={syncing}>
+                {syncing ? 'Syncing…' : 'Sync'}
+              </button>
+            </>
+          )}
         </div>
       </div>
+
+      {showSheetsModal && (
+        <SheetSetupModal
+          projectName={projectName}
+          scriptId={scriptId!}
+          token={token!}
+          onClose={() => setShowSheetsModal(false)}
+          onCreated={(sheetsId, sheetsUrl) => {
+            setScript((prev) => prev ? { ...prev, sheets_id: sheetsId, sheets_url: sheetsUrl } : prev)
+            setShowSheetsModal(false)
+          }}
+        />
+      )}
 
       {shareUrl && (
         <div className="sl-share-banner">
@@ -338,5 +398,151 @@ function ShotRow({ shot, isEditing, onEdit, onClose, onUpdate, onDelete }: RowPr
         <button className="sl-btn-edit" onClick={(e) => { e.stopPropagation(); onEdit() }}>Edit</button>
       </td>
     </tr>
+  )
+}
+
+// ─── Sheet Setup Modal ────────────────────────────────────────────────────────
+
+function genAbbrev(name: string): string {
+  return name
+    .split(/\s+/)
+    .map((word) => {
+      const first = word.charAt(0)
+      return first.replace(/[Đđ]/g, 'd').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z]/g, '')
+    })
+    .filter(Boolean)
+    .join('')
+    .toUpperCase()
+}
+
+function SheetSetupModal({
+  projectName,
+  scriptId,
+  token,
+  onClose,
+  onCreated,
+}: {
+  projectName: string
+  scriptId: string
+  token: string
+  onClose: () => void
+  onCreated: (sheetsId: string, sheetsUrl: string) => void
+}) {
+  const [folders, setFolders] = useState<DriveFolder[]>([])
+  const [folderId, setFolderId] = useState('root')
+  const [abbrev, setAbbrev] = useState(() => genAbbrev(projectName))
+  const [versionType, setVersionType] = useState<'draft' | 'final'>('draft')
+  const [versionNum, setVersionNum] = useState('01')
+  const [creating, setCreating] = useState(false)
+  const [loadingFolders, setLoadingFolders] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    googleApi.getDriveFolders(token)
+      .then((res) => setFolders(res.folders))
+      .catch(() => setFolders([{ id: 'root', name: 'My Drive (root)' }]))
+      .finally(() => setLoadingFolders(false))
+  }, [token])
+
+  const now = new Date()
+  const dateStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
+  const versionSuffix = versionType === 'final' ? '[FINAL]' : `[Draft_${versionNum.padStart(2, '0')}]`
+  const previewName = `${dateStr}_${abbrev || 'ABBREV'}_Shotlist_${versionSuffix}`
+
+  async function handleCreate() {
+    if (!abbrev.trim()) { setError('Tên tắt không được để trống'); return }
+    setCreating(true)
+    setError('')
+    try {
+      const res = await googleApi.sheetsSetup(token, {
+        scriptId,
+        folderId: folderId === 'root' ? undefined : folderId,
+        abbrev: abbrev.trim(),
+        projectName,
+        versionType,
+        versionNum: versionType === 'draft' ? versionNum.padStart(2, '0') : undefined,
+      })
+      onCreated(res.sheetsId, res.sheetsUrl)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Tạo sheet thất bại')
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div className="sl-modal-overlay" onClick={onClose}>
+      <div className="sl-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="sl-modal-header">
+          <h3>Tạo Google Sheet</h3>
+          <button className="sl-modal-close" onClick={onClose}>×</button>
+        </div>
+
+        <div className="sl-modal-body">
+          <label className="sl-modal-label">
+            Lưu vào folder
+            <select
+              className="sl-select sl-modal-select"
+              value={folderId}
+              onChange={(e) => setFolderId(e.target.value)}
+              disabled={loadingFolders}
+            >
+              {loadingFolders
+                ? <option>Đang tải…</option>
+                : folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)
+              }
+            </select>
+          </label>
+
+          <label className="sl-modal-label">
+            Tên tắt dự án
+            <input
+              className="sl-input sl-modal-input"
+              value={abbrev}
+              onChange={(e) => setAbbrev(e.target.value.toUpperCase())}
+              placeholder="BODND"
+              maxLength={10}
+            />
+          </label>
+
+          <fieldset className="sl-modal-fieldset">
+            <legend>Phiên bản</legend>
+            <label className="sl-modal-radio">
+              <input type="radio" value="draft" checked={versionType === 'draft'} onChange={() => setVersionType('draft')} />
+              Draft
+            </label>
+            <label className="sl-modal-radio">
+              <input type="radio" value="final" checked={versionType === 'final'} onChange={() => setVersionType('final')} />
+              Final
+            </label>
+            {versionType === 'draft' && (
+              <label className="sl-modal-label sl-modal-label-inline">
+                Số
+                <input
+                  className="sl-input sl-modal-input-sm"
+                  value={versionNum}
+                  onChange={(e) => setVersionNum(e.target.value)}
+                  placeholder="01"
+                  maxLength={2}
+                />
+              </label>
+            )}
+          </fieldset>
+
+          <div className="sl-modal-preview">
+            <span className="sl-modal-preview-label">Tên file:</span>
+            <code>{previewName}</code>
+          </div>
+
+          {error && <div className="sl-modal-error">{error}</div>}
+        </div>
+
+        <div className="sl-modal-footer">
+          <button className="sl-action-btn" onClick={onClose} disabled={creating}>Hủy</button>
+          <button className="sl-action-btn sl-btn-primary" onClick={handleCreate} disabled={creating}>
+            {creating ? 'Đang tạo…' : 'Tạo Sheet'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }

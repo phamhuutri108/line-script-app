@@ -246,19 +246,19 @@ async function autoSync(scriptId: string, userId: string, env: Env): Promise<voi
     const token = await getValidToken(userId, env)
     if (!token) return
 
-    const gtRecord = await env.DB.prepare(
-      'SELECT sheets_id FROM google_tokens WHERE user_id = ?'
-    ).bind(userId).first<{ sheets_id: string | null }>()
-    if (!gtRecord?.sheets_id) return
+    const scriptRecord = await env.DB.prepare(
+      'SELECT sheets_id FROM scripts WHERE id = ?'
+    ).bind(scriptId).first<{ sheets_id: string | null }>()
+    if (!scriptRecord?.sheets_id) return
 
-    const sheetsId = gtRecord.sheets_id
+    const sheetsId = scriptRecord.sheets_id
     const shots = await env.DB.prepare(
       'SELECT * FROM shots WHERE script_id = ? AND user_id = ? ORDER BY shot_number ASC'
     ).bind(scriptId, userId).all()
 
-    // Clear existing data rows (correct Sheets API clear endpoint)
+    // Clear data rows (row 5+ = index 4+, correct Sheets API clear endpoint)
     await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A2:R1000:clear`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A5:R1000:clear`,
       {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -268,10 +268,9 @@ async function autoSync(scriptId: string, userId: string, env: Env): Promise<voi
 
     if (shots.results.length === 0) return
 
-    // Columns: #, Scene, Location, INT/EXT, D/N, Description, Dialogue,
-    //          Subjects, Script Time, Shot Size, Shot Type, Side,
-    //          Angle, Movement, Lens, Notes, Storyboard (17 cols → A:Q)
+    // 18 cols: A(empty marker) + B(#) + C-R (data)
     const rows = shots.results.map((s: Record<string, unknown>) => [
+      '',
       s.shot_number,
       s.scene_number ?? '',
       s.location ?? '',
@@ -292,7 +291,7 @@ async function autoSync(scriptId: string, userId: string, env: Env): Promise<voi
     ])
 
     await fetch(
-      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A2:Q${shots.results.length + 1}?valueInputOption=USER_ENTERED`,
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A5:R${shots.results.length + 4}?valueInputOption=USER_ENTERED`,
       {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
