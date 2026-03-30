@@ -157,6 +157,7 @@ export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, 
               onUpdate={(data) => handleUpdate(shot.id, data)}
               onDelete={() => handleDelete(shot.id)}
               onClick={() => onShotClick?.(shot)}
+              onShotChanged={(updated) => setShots((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
             />
           ))
         )}
@@ -174,10 +175,38 @@ interface RowProps {
   onUpdate: (data: ShotUpdate) => void
   onDelete: () => void
   onClick: () => void
+  onShotChanged: (updated: Shot) => void
 }
 
-function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, onDelete, onClick }: RowProps) {
+function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, onDelete, onClick, onShotChanged }: RowProps) {
+  const { token } = useAuthStore()
   const [draft, setDraft] = useState<ShotUpdate>({})
+  const [uploading, setUploading] = useState(false)
+  const [driveError, setDriveError] = useState<string | null>(null)
+
+  async function handleStoryboardUpload(file: File) {
+    setUploading(true)
+    setDriveError(null)
+    try {
+      const res = await shotsApi.uploadStoryboard(token!, shot.id, file)
+      onShotChanged({ ...shot, storyboard_drive_id: res.driveFileId, storyboard_view_url: res.viewUrl })
+    } catch (err: unknown) {
+      const e = err as { message?: string; code?: string }
+      if (e.code === 'GOOGLE_NOT_CONNECTED') {
+        setDriveError('GOOGLE_NOT_CONNECTED')
+      } else {
+        setDriveError(e.message ?? 'Upload failed')
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleStoryboardDelete() {
+    if (!confirm('Remove storyboard image?')) return
+    await shotsApi.deleteStoryboard(token!, shot.id)
+    onShotChanged({ ...shot, storyboard_drive_id: null, storyboard_view_url: null })
+  }
   const hasChanges = Object.keys(draft).length > 0
 
   function set(field: keyof ShotUpdate, value: string) {
@@ -227,6 +256,13 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
             {[shot.int_ext, shot.day_night, shot.shot_size].filter(Boolean).join(' · ') || 'No details yet'}
           </div>
         </div>
+        {shot.storyboard_view_url && (
+          <img
+            src={shot.storyboard_view_url}
+            alt="storyboard"
+            style={{ width: 36, height: 27, objectFit: 'cover', borderRadius: '3px', flexShrink: 0, border: '1px solid var(--color-border)' }}
+          />
+        )}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth={2}
           style={{ transform: isEditing ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s', flexShrink: 0 }}>
           <polyline points="6 9 12 15 18 9" />
@@ -251,6 +287,38 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
           <ShotSelect label="Movement" options={MOVEMENT_OPTIONS} value={val('movement')} onChange={(v) => set('movement', v)} />
           <ShotField label="Lens" value={val('lens')} onChange={(v) => set('lens', v)} placeholder="e.g. 50mm" />
           <ShotField label="Notes" value={val('notes')} onChange={(v) => set('notes', v)} multiline />
+
+          {/* Storyboard */}
+          <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
+            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>Storyboard</div>
+            {driveError === 'GOOGLE_NOT_CONNECTED' ? (
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-warning, #f59e0b)', background: 'rgba(245,158,11,0.08)', borderRadius: '6px', padding: '0.5rem 0.6rem' }}>
+                Google Drive not connected.{' '}
+                <a href="/settings" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }}>Connect in Settings</a>
+                {' '}to use storyboard upload.
+              </div>
+            ) : driveError ? (
+              <div style={{ fontSize: '0.75rem', color: 'var(--color-danger, #ef4444)' }}>{driveError}</div>
+            ) : null}
+            {shot.storyboard_view_url ? (
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <img src={shot.storyboard_view_url} alt="storyboard" style={{ height: 54, borderRadius: '4px', border: '1px solid var(--color-border)', objectFit: 'cover' }} />
+                <button className="btn btn-danger btn-sm" onClick={handleStoryboardDelete} style={{ fontSize: '0.7rem' }}>Remove</button>
+              </div>
+            ) : (
+              <label style={{ display: 'inline-block', cursor: 'pointer' }}>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  style={{ display: 'none' }}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleStoryboardUpload(f) }}
+                />
+                <span className="btn btn-sm" style={{ fontSize: '0.75rem', opacity: uploading ? 0.6 : 1, pointerEvents: uploading ? 'none' : 'auto' }}>
+                  {uploading ? 'Uploading…' : '+ Upload image'}
+                </span>
+              </label>
+            )}
+          </div>
 
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
             <button className="btn btn-primary btn-sm" onClick={handleSave} style={{ flex: 1 }}>

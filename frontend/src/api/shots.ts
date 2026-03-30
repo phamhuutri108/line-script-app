@@ -17,6 +17,8 @@ export interface Shot {
   movement: string | null
   lens: string | null
   notes: string | null
+  storyboard_drive_id: string | null
+  storyboard_view_url: string | null
   created_at: number
   updated_at: number
 }
@@ -54,4 +56,24 @@ export const shotsApi = {
 
   getCsvUrl: (scriptId: string) =>
     `${import.meta.env.VITE_API_URL}/shots/${scriptId}/export?format=csv`,
+
+  uploadStoryboard: async (token: string, shotId: string, file: File) => {
+    const form = new FormData()
+    form.append('shotId', shotId)
+    form.append('file', file)
+    const res = await fetch(`${import.meta.env.VITE_API_URL}/storyboard/upload`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    })
+    const data = await res.json() as { driveFileId?: string; viewUrl?: string; error?: string; code?: string }
+    if (!res.ok) throw Object.assign(new Error(data.error ?? 'Upload failed'), { code: data.code })
+    return data as { driveFileId: string; viewUrl: string }
+  },
+
+  deleteStoryboard: (token: string, shotId: string) =>
+    fetch(`${import.meta.env.VITE_API_URL}/storyboard/${shotId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((r) => r.json()) as Promise<{ success: boolean }>,
 }

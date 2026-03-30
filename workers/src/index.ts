@@ -61,6 +61,10 @@ export default {
         const { handleGoogle } = await import('./routes/google')
         return await handleGoogle(request, env)
       }
+      if (path.startsWith('/storyboard')) {
+        const { handleStoryboard } = await import('./routes/storyboard')
+        return await handleStoryboard(request, env)
+      }
       if (path.startsWith('/webhook')) {
         const { handleWebhook } = await import('./routes/webhook')
         return await handleWebhook(request, env)
