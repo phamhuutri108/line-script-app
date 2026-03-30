@@ -2,7 +2,7 @@ import { jwtVerify } from 'jose'
 import type { Env } from '../index'
 
 export interface JWTPayload {
-  sub: string       // user id
+  sub: string
   email: string
   role: string
   name: string
@@ -13,7 +13,7 @@ export async function verifyAuth(request: Request, env: Env): Promise<JWTPayload
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw new Response(JSON.stringify({ error: 'Unauthorized' }), {
       status: 401,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     })
   }
 
@@ -26,16 +26,16 @@ export async function verifyAuth(request: Request, env: Env): Promise<JWTPayload
   } catch {
     throw new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
       status: 401,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     })
   }
 }
 
-export function requireRole(user: JWTPayload, role: 'admin'): void {
-  if (user.role !== role) {
-    throw new Response(JSON.stringify({ error: 'Forbidden' }), {
+export function requireAdmin(user: JWTPayload): void {
+  if (user.role !== 'admin') {
+    throw new Response(JSON.stringify({ error: 'Forbidden: admin only' }), {
       status: 403,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     })
   }
 }
