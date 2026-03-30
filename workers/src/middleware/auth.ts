@@ -1,10 +1,12 @@
 import { jwtVerify } from 'jose'
 import type { Env } from '../index'
 
+export type UserRole = 'super_admin' | 'owner' | 'member' | 'pending'
+
 export interface JWTPayload {
   sub: string
   email: string
-  role: string
+  role: UserRole
   name: string
 }
 
@@ -31,11 +33,24 @@ export async function verifyAuth(request: Request, env: Env): Promise<JWTPayload
   }
 }
 
-export function requireAdmin(user: JWTPayload): void {
-  if (user.role !== 'admin') {
-    throw new Response(JSON.stringify({ error: 'Forbidden: admin only' }), {
+export function requireSuperAdmin(user: JWTPayload): void {
+  if (user.role !== 'super_admin') {
+    throw new Response(JSON.stringify({ error: 'Forbidden: super admin only' }), {
       status: 403,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     })
   }
+}
+
+export function requireOwnerOrAbove(user: JWTPayload): void {
+  if (user.role !== 'super_admin' && user.role !== 'owner') {
+    throw new Response(JSON.stringify({ error: 'Forbidden: owner or above required' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    })
+  }
+}
+
+export function isSuperAdmin(user: JWTPayload): boolean {
+  return user.role === 'super_admin'
 }
