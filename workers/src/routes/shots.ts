@@ -20,7 +20,7 @@ interface ShotBody {
   pageNumber?: number
 }
 
-export async function handleShots(request: Request, env: Env): Promise<Response> {
+export async function handleShots(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url)
   const parts = url.pathname.replace(/^\/shots/, '').split('/').filter(Boolean)
   // parts[0] = scriptId or shotId, parts[1] = 'export' | 'share'
@@ -43,17 +43,17 @@ export async function handleShots(request: Request, env: Env): Promise<Response>
   // POST /shots
   if (request.method === 'POST' && parts.length === 0) {
     const user = await verifyAuth(request, env)
-    return createShot(request, user, env)
+    return createShot(request, user, env, ctx)
   }
   // PUT /shots/:id
   if (request.method === 'PUT' && parts.length === 1) {
     const user = await verifyAuth(request, env)
-    return updateShot(parts[0], request, user, env)
+    return updateShot(parts[0], request, user, env, ctx)
   }
   // DELETE /shots/:id
   if (request.method === 'DELETE' && parts.length === 1) {
     const user = await verifyAuth(request, env)
-    return deleteShot(parts[0], user, env)
+    return deleteShot(parts[0], user, env, ctx)
   }
 
   return jsonResponse({ error: 'Not found' }, 404)
@@ -113,6 +113,7 @@ async function createShot(
   request: Request,
   user: Awaited<ReturnType<typeof verifyAuth>>,
   env: Env,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   let body: ShotBody
   try { body = await request.json() } catch { return jsonResponse({ error: 'Invalid JSON' }, 400) }
@@ -145,6 +146,7 @@ async function createShot(
   ).run()
 
   const shot = await env.DB.prepare('SELECT * FROM shots WHERE id = ?').bind(id).first()
+  ctx.waitUntil(autoSync(body.scriptId, user.sub, env))
   return jsonResponse({ shot }, 201)
 }
 
@@ -153,8 +155,9 @@ async function updateShot(
   request: Request,
   user: Awaited<ReturnType<typeof verifyAuth>>,
   env: Env,
+  ctx: ExecutionContext,
 ): Promise<Response> {
-  const shot = await env.DB.prepare('SELECT * FROM shots WHERE id = ?').bind(shotId).first<{ user_id: string }>()
+  const shot = await env.DB.prepare('SELECT * FROM shots WHERE id = ?').bind(shotId).first<{ user_id: string; script_id: string }>()
   if (!shot) return jsonResponse({ error: 'Shot not found' }, 404)
   if (!isSuperAdmin(user) && shot.user_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)
 
@@ -186,6 +189,7 @@ async function updateShot(
   ).run()
 
   const updated = await env.DB.prepare('SELECT * FROM shots WHERE id = ?').bind(shotId).first()
+  ctx.waitUntil(autoSync(shot.script_id, user.sub, env))
   return jsonResponse({ shot: updated })
 }
 
@@ -193,13 +197,64 @@ async function deleteShot(
   shotId: string,
   user: Awaited<ReturnType<typeof verifyAuth>>,
   env: Env,
+  ctx: ExecutionContext,
 ): Promise<Response> {
-  const shot = await env.DB.prepare('SELECT * FROM shots WHERE id = ?').bind(shotId).first<{ user_id: string }>()
+  const shot = await env.DB.prepare('SELECT * FROM shots WHERE id = ?').bind(shotId).first<{ user_id: string; script_id: string }>()
   if (!shot) return jsonResponse({ error: 'Shot not found' }, 404)
   if (!isSuperAdmin(user) && shot.user_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)
 
   await env.DB.prepare('DELETE FROM shots WHERE id = ?').bind(shotId).run()
+  ctx.waitUntil(autoSync(shot.script_id, user.sub, env))
   return jsonResponse({ success: true })
+}
+
+async function autoSync(scriptId: string, userId: string, env: Env): Promise<void> {
+  try {
+    const { getValidToken } = await import('./google')
+    const token = await getValidToken(userId, env)
+    if (!token) return
+
+    const gtRecord = await env.DB.prepare(
+      'SELECT sheets_id FROM google_tokens WHERE user_id = ?'
+    ).bind(userId).first<{ sheets_id: string | null }>()
+    if (!gtRecord?.sheets_id) return
+
+    const sheetsId = gtRecord.sheets_id
+    const shots = await env.DB.prepare(
+      'SELECT * FROM shots WHERE script_id = ? AND user_id = ? ORDER BY shot_number ASC'
+    ).bind(scriptId, userId).all()
+
+    // Clear existing data rows
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A2:M1000:clear`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: '{}',
+      }
+    )
+
+    if (shots.results.length === 0) return
+
+    const rows = shots.results.map((s: Record<string, unknown>) => [
+      s.shot_number, s.scene_number ?? '', s.location ?? '',
+      s.int_ext ?? '', s.day_night ?? '', s.description ?? '',
+      s.dialogue ?? '', s.angle ?? '', s.shot_size ?? '',
+      s.movement ?? '', s.lens ?? '', s.notes ?? '',
+      s.storyboard_view_url ? `=IMAGE("${s.storyboard_view_url}")` : '',
+    ])
+
+    await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${sheetsId}/values/Shotlist!A2:M${shots.results.length + 1}?valueInputOption=USER_ENTERED`,
+      {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: rows }),
+      }
+    )
+  } catch {
+    // Silent fail — don't affect the main response
+  }
 }
 
 async function exportShots(

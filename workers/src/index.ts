@@ -12,7 +12,7 @@ export interface Env {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === 'OPTIONS') {
       return handleOptions(request)
     }
@@ -51,7 +51,7 @@ export default {
       }
       if (path.startsWith('/shots')) {
         const { handleShots } = await import('./routes/shots')
-        return await handleShots(request, env)
+        return await handleShots(request, env, ctx)
       }
       if (path.startsWith('/share/')) {
         const { handleShare } = await import('./routes/shots')

@@ -1,5 +1,5 @@
 import { verifyAuth } from '../middleware/auth'
-import { jsonResponse, generateId } from '../utils'
+import { jsonResponse } from '../utils'
 import type { Env } from '../index'
 
 const SCOPES = [
@@ -62,7 +62,7 @@ export async function handleGoogle(request: Request, env: Env): Promise<Response
 }
 
 function getAuthUrl(userId: string, env: Env): Response {
-  const state = Buffer.from(JSON.stringify({ userId })).toString('base64')
+  const state = btoa(JSON.stringify({ userId }))
   const params = new URLSearchParams({
     client_id: env.GOOGLE_CLIENT_ID,
     redirect_uri: env.GOOGLE_REDIRECT_URI,
@@ -90,7 +90,7 @@ async function handleCallback(url: URL, env: Env): Promise<Response> {
 
   let userId: string
   try {
-    const decoded = JSON.parse(Buffer.from(state, 'base64').toString())
+    const decoded = JSON.parse(atob(state))
     userId = decoded.userId
   } catch {
     return Response.redirect(`${frontendBase}/settings?google=error`, 302)
@@ -217,18 +217,13 @@ async function syncAll(request: Request, userId: string, env: Env): Promise<Resp
 
   if (shots.results.length === 0) return jsonResponse({ synced: 0 })
 
-  const rows = shots.results.map((s: Record<string, unknown>, i: number) => {
-    const rowNum = i + 2 // row 1 = header
-    return [
-      s.shot_number, s.scene_number ?? '', s.location ?? '',
-      s.int_ext ?? '', s.day_night ?? '', s.description ?? '',
-      s.dialogue ?? '', s.angle ?? '', s.shot_size ?? '',
-      s.movement ?? '', s.lens ?? '', s.notes ?? '',
-      s.storyboard_view_url
-        ? `=IMAGE("${s.storyboard_view_url}")`
-        : '',
-    ]
-  })
+  const rows = shots.results.map((s: Record<string, unknown>) => [
+    s.shot_number, s.scene_number ?? '', s.location ?? '',
+    s.int_ext ?? '', s.day_night ?? '', s.description ?? '',
+    s.dialogue ?? '', s.angle ?? '', s.shot_size ?? '',
+    s.movement ?? '', s.lens ?? '', s.notes ?? '',
+    s.storyboard_view_url ? `=IMAGE("${s.storyboard_view_url}")` : '',
+  ])
 
   await fetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${gtRecord.sheets_id}/values/Shotlist!A2:M${shots.results.length + 1}?valueInputOption=USER_ENTERED`,
