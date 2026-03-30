@@ -11,6 +11,7 @@ import ViewerPage from './components/viewer/ViewerPage'
 import AdminPage from './components/admin/AdminPage'
 import InvitePage from './components/auth/InvitePage'
 import SharePage from './components/share/SharePage'
+import SettingsPage from './components/settings/SettingsPage'
 
 export default function App() {
   const { token, user } = useAuthStore()
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/projects/:id" element={<ProjectDetailPage />} />
           <Route path="/admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Route>
 
         {/* Catch-all */}

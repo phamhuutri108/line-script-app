@@ -77,3 +77,10 @@ export const scriptsApi = {
   getPdfUrl: (id: string) =>
     `${import.meta.env.VITE_API_URL}/scripts/${id}/pdf`,
 }
+
+export const inviteApi = {
+  create: (token: string, projectId: string, email?: string) =>
+    api.post<{ token: string; expiresAt: number; projectName: string }>(
+      '/invite', { projectId, email }, token,
+    ),
+}

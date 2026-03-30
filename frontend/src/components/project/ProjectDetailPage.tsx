@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent, type DragEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { projectsApi, scriptsApi, type Project, type ProjectMember, type Script } from '../../api/projects'
+import { projectsApi, scriptsApi, inviteApi, type Project, type ProjectMember, type Script } from '../../api/projects'
 import { ApiError } from '../../api/client'
 import { useAuthStore } from '../../stores/authStore'
 import '../layout/layout.css'
@@ -24,6 +24,7 @@ export default function ProjectDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showUpload, setShowUpload] = useState(false)
+  const [showInvite, setShowInvite] = useState(false)
 
   useEffect(() => {
     loadProject()
@@ -160,6 +161,11 @@ export default function ProjectDetailPage() {
             <div className="section-card">
               <div className="section-card-header">
                 <h3>Members ({members.length})</h3>
+                {canManage && (
+                  <button className="btn btn-secondary btn-sm" onClick={() => setShowInvite(true)}>
+                    + Mời
+                  </button>
+                )}
               </div>
               <div className="member-list">
                 {members.map((m) => (
@@ -194,6 +200,12 @@ export default function ProjectDetailPage() {
           projectId={id!}
           onClose={() => setShowUpload(false)}
           onUploaded={(s) => { setScripts((prev) => [s, ...prev]); setShowUpload(false) }}
+        />
+      )}
+      {showInvite && (
+        <InviteModal
+          projectId={id!}
+          onClose={() => setShowInvite(false)}
         />
       )}
     </>
@@ -319,6 +331,105 @@ function UploadScriptModal({
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  )
+}
+
+function InviteModal({ projectId, onClose }: { projectId: string; onClose: () => void }) {
+  const { token } = useAuthStore()
+  const [email, setEmail] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ link: string; expiresAt: number } | null>(null)
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const BASE = window.location.origin
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const data = await inviteApi.create(token!, projectId, email.trim() || undefined)
+      setResult({ link: `${BASE}/invite/${data.token}`, expiresAt: data.expiresAt })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Lỗi tạo link mời')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleCopy() {
+    if (!result) return
+    await navigator.clipboard.writeText(result.link)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header">
+          <h3>Mời thành viên</h3>
+          <button className="btn-close" onClick={onClose}>×</button>
+        </div>
+
+        {result ? (
+          <div style={{ padding: '0 0 0.5rem' }}>
+            <p style={{ fontSize: '0.875rem', color: 'var(--color-text-muted)', marginBottom: '1rem' }}>
+              Link mời (hết hạn sau 7 ngày — dùng 1 lần):
+            </p>
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'stretch' }}>
+              <input
+                readOnly
+                value={result.link}
+                style={{
+                  flex: 1, background: 'var(--color-surface-2)', border: '1px solid var(--color-border)',
+                  borderRadius: '8px', padding: '0.5rem 0.75rem', fontSize: '0.8rem',
+                  color: 'var(--color-text)', outline: 'none',
+                }}
+                onFocus={(e) => e.target.select()}
+              />
+              <button className="btn btn-primary btn-sm" onClick={handleCopy} style={{ whiteSpace: 'nowrap' }}>
+                {copied ? '✓ Đã copy' : 'Copy'}
+              </button>
+            </div>
+            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.75rem' }}>
+              Gửi link này cho thành viên qua email hoặc tin nhắn. Họ click vào và tạo tài khoản là xong, không cần duyệt.
+            </p>
+            <div className="modal-actions" style={{ marginTop: '1rem' }}>
+              <button className="btn btn-secondary" onClick={() => { setResult(null); setEmail('') }}>
+                Tạo link mới
+              </button>
+              <button className="btn btn-primary" onClick={onClose}>Xong</button>
+            </div>
+          </div>
+        ) : (
+          <form className="modal-form" onSubmit={handleSubmit}>
+            {error && <div className="error-msg">{error}</div>}
+            <div className="form-group">
+              <label htmlFor="invite-email">Email (tùy chọn)</label>
+              <input
+                id="invite-email"
+                type="email"
+                placeholder="member@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+              />
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.35rem' }}>
+                Để trống để tạo link dùng chung. Nhập email để link chỉ dùng được cho người đó.
+              </p>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={onClose}>Huỷ</button>
+              <button type="submit" className="btn btn-primary" disabled={loading}>
+                {loading ? 'Đang tạo…' : 'Tạo link mời'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   )

@@ -5,6 +5,10 @@ export interface Env {
   SCRIPTS_BUCKET: R2Bucket
   JWT_SECRET: string
   ENVIRONMENT: string
+  GOOGLE_CLIENT_ID: string
+  GOOGLE_CLIENT_SECRET: string
+  GOOGLE_REDIRECT_URI: string
+  WEBHOOK_SECRET: string
 }
 
 export default {
@@ -52,6 +56,14 @@ export default {
       if (path.startsWith('/share/')) {
         const { handleShare } = await import('./routes/shots')
         return await handleShare(request, env)
+      }
+      if (path.startsWith('/google')) {
+        const { handleGoogle } = await import('./routes/google')
+        return await handleGoogle(request, env)
+      }
+      if (path.startsWith('/webhook')) {
+        const { handleWebhook } = await import('./routes/webhook')
+        return await handleWebhook(request, env)
       }
 
       return new Response(JSON.stringify({ error: 'Not found' }), {
