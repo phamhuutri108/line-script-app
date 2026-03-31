@@ -4,7 +4,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { api } from '../../api/client'
 import { scenesApi, type SceneMarker } from '../../api/scenes'
 import { annotationsApi, type AnnotationRecord } from '../../api/annotations'
-import type { Shot } from '../../api/shots'
+import { shotsApi, type Shot } from '../../api/shots'
 import type { LineToolState } from './LineToolbar'
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -62,10 +62,13 @@ interface ShotLabel {
   lineId: string
   x: number
   yTop: number
+  yBottom: number
   color: string
   sceneNum: number
   shotNum: number
   shotSize: string
+  shotType: string
+  movement: string
 }
 
 // ── Undo/Redo ────────────────────────────────────────────────────────────────
@@ -99,12 +102,15 @@ interface Props {
   onSceneMarkersChanged?: () => void
   onExtractSceneName?: (yNorm: number) => Promise<string>
   onUndoStateChange?: (canUndo: boolean, canRedo: boolean) => void
+  onShotUpdated?: (shot: Shot) => void
   highlightLineId?: string | null
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const STROKE_WIDTH = 2
+const SHOT_TYPE_OPTIONS = ['', 'Single', 'Two', 'Three', 'Group', 'Observe', 'Insert', 'POV', 'OTS']
+const MOVEMENT_OPTIONS = ['', 'Static', 'Pan', 'Tilt', 'Dolly', 'Tracking', 'Handheld', 'Crane', 'Drone']
 const BRACKET_HALF = 12   // px, half-width of bracket marks
 const ZIGZAG_AMP   = 7    // px, horizontal amplitude of zigzag
 const ZIGZAG_STEP  = 12   // px, pixels per half-wave
@@ -152,12 +158,12 @@ function computeLabels(
   const labels: ShotLabel[] = []
   noScene.forEach((line, idx) => {
     const s = shots.find((sh) => sh.line_id === line.id)
-    labels.push({ lineId: line.id, x: line.x_position * w, yTop: line.y_start * h, color: line.color, sceneNum: 0, shotNum: idx + 1, shotSize: s?.shot_size ?? '' })
+    labels.push({ lineId: line.id, x: line.x_position * w, yTop: line.y_start * h, yBottom: line.y_end * h, color: line.color, sceneNum: 0, shotNum: idx + 1, shotSize: s?.shot_size ?? '', shotType: s?.shot_type ?? '', movement: s?.movement ?? '' })
   })
   sceneGroups.forEach((group, sIdx) => {
     group.forEach((line, shotIdx) => {
       const s = shots.find((sh) => sh.line_id === line.id)
-      labels.push({ lineId: line.id, x: line.x_position * w, yTop: line.y_start * h, color: line.color, sceneNum: sIdx + 1, shotNum: shotIdx + 1, shotSize: s?.shot_size ?? '' })
+      labels.push({ lineId: line.id, x: line.x_position * w, yTop: line.y_start * h, yBottom: line.y_end * h, color: line.color, sceneNum: sIdx + 1, shotNum: shotIdx + 1, shotSize: s?.shot_size ?? '', shotType: s?.shot_type ?? '', movement: s?.movement ?? '' })
     })
   })
   return labels
@@ -167,7 +173,7 @@ function computeLabels(
 
 export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   width, height, scriptId, pageNumber, toolState, shots,
-  onLineCreated, onLineDeleted, onSceneMarkersChanged, onExtractSceneName, onUndoStateChange, highlightLineId,
+  onLineCreated, onLineDeleted, onSceneMarkersChanged, onExtractSceneName, onUndoStateChange, onShotUpdated, highlightLineId,
 }, ref) {
   const canvasRef         = useRef<HTMLCanvasElement>(null)
   const fabricRef         = useRef<Canvas | null>(null)
@@ -178,12 +184,15 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   const undoStackRef      = useRef<UndoEntry[]>([])
   const redoStackRef      = useRef<UndoEntry[]>([])
   const dragStartXRef     = useRef<number>(0)
+  const draggingXRef      = useRef<Record<string, number>>({})
   const { token } = useAuthStore()
 
   const [lines, setLines] = useState<LineRecord[]>([])
   const [markers, setMarkers] = useState<SceneMarker[]>([])
   const [annotations, setAnnotations] = useState<AnnotationRecord[]>([])
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [draggingX, setDraggingX] = useState<Record<string, number>>({})
+  const [activeBadge, setActiveBadge] = useState<{ lineId: string; field: 'shot_type' | 'movement' } | null>(null)
 
   const labels = computeLabels(lines, markers, shots, width, height)
 
@@ -897,10 +906,15 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
       }
     }
     function onSelUpdated(e: { selected?: unknown[] }) { if (e.selected?.[0]) showHandles(e.selected[0]) }
-    function onSelCleared() { clearHandles(); canvas!.requestRenderAll() }
+    function onSelCleared() {
+      clearHandles()
+      draggingXRef.current = {}
+      setDraggingX({})
+      canvas!.requestRenderAll()
+    }
     function onObjMoving(e: { target?: unknown }) {
       const obj = e.target as {
-        data?: { type?: string; color?: string; yStartPx?: number; yEndPx?: number }
+        data?: { id?: string; type?: string; color?: string; yStartPx?: number; yEndPx?: number }
         getCenterPoint: () => { x: number }
       }
       if (obj?.data?.type !== 'line') return
@@ -909,8 +923,13 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
       if (handleCirclesRef.current.length === 2) {
         handleCirclesRef.current[0].set({ left: cx })
         handleCirclesRef.current[1].set({ left: cx })
-        canvas!.requestRenderAll()
       }
+      // Real-time label position update
+      if (obj.data?.id) {
+        draggingXRef.current[obj.data.id] = cx
+        setDraggingX({ ...draggingXRef.current })
+      }
+      canvas!.requestRenderAll()
     }
 
     canvas.on('selection:created', onSelCreated as (e: object) => void)
@@ -1013,6 +1032,18 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     setContextMenu(null)
   }
 
+  // ── Badge update ──────────────────────────────────────────────────────────
+
+  async function handleBadgeUpdate(lineId: string, field: 'shot_type' | 'movement', value: string) {
+    const shot = shots.find((s) => s.line_id === lineId)
+    if (!shot || !token) return
+    try {
+      const res = await shotsApi.update(token, shot.id, { [field]: value || null })
+      onShotUpdated?.(res.shot)
+    } catch { /* ignore */ }
+    setActiveBadge(null)
+  }
+
   // ── Cursor ────────────────────────────────────────────────────────────────
 
   const cursor = toolState.mode === 'draw'
@@ -1025,7 +1056,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     <div
       className="script-canvas-wrapper"
       style={{ position: 'absolute', top: 0, left: 0, width, height }}
-      onClick={() => contextMenu && setContextMenu(null)}
+      onClick={() => { contextMenu && setContextMenu(null); activeBadge && setActiveBadge(null) }}
     >
       <canvas ref={canvasRef} className="fabric-canvas-el" style={{ cursor, touchAction: 'none' }} />
 
@@ -1042,18 +1073,74 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
 
       {/* Shot labels overlay */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-        {labels.map((label) => (
-          <div
-            key={label.lineId}
-            className="shot-label"
-            style={{ left: label.x, top: label.yTop, transform: 'translateX(-50%)', color: label.color, borderColor: label.color }}
-          >
-            <span className="shot-label-num">
-              {label.sceneNum > 0 ? `${label.sceneNum}/` : ''}{label.shotNum}
-            </span>
-            {label.shotSize && <span className="shot-label-size">{label.shotSize}</span>}
-          </div>
-        ))}
+        {labels.map((label) => {
+          const x = draggingX[label.lineId] ?? label.x
+          return (
+            <div
+              key={label.lineId}
+              className="shot-label"
+              style={{ left: x, top: label.yTop, transform: 'translateX(-50%) translateY(-100%)', color: label.color, borderColor: label.color, pointerEvents: 'auto', cursor: 'default' }}
+            >
+              <span className="shot-label-num">
+                {label.sceneNum > 0 ? `${label.sceneNum}/` : ''}{label.shotNum}
+              </span>
+              {label.shotSize && <span className="shot-label-size">{label.shotSize}</span>}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Shot badges overlay (Type + Movement near end bracket) */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+        {labels.map((label) => {
+          const x = draggingX[label.lineId] ?? label.x
+          const typeActive = activeBadge?.lineId === label.lineId && activeBadge.field === 'shot_type'
+          const movActive = activeBadge?.lineId === label.lineId && activeBadge.field === 'movement'
+          return (
+            <div
+              key={label.lineId}
+              className="shot-badges-group"
+              style={{ left: x, top: label.yBottom, transform: 'translateX(-50%) translateY(6px)' }}
+            >
+              <div style={{ position: 'relative' }}>
+                <button
+                  className="shot-badge"
+                  style={{ borderColor: label.color, color: typeActive ? 'white' : label.color, background: typeActive ? label.color : 'white' }}
+                  onClick={(e) => { e.stopPropagation(); setActiveBadge(typeActive ? null : { lineId: label.lineId, field: 'shot_type' }) }}
+                >
+                  {label.shotType || 'T'}
+                </button>
+                {typeActive && (
+                  <div className="badge-popup">
+                    {SHOT_TYPE_OPTIONS.map((opt) => (
+                      <button key={opt || '__empty__'} className={`badge-popup-item${opt === label.shotType ? ' active' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); handleBadgeUpdate(label.lineId, 'shot_type', opt) }}
+                      >{opt || '—'}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ position: 'relative' }}>
+                <button
+                  className="shot-badge"
+                  style={{ borderColor: label.color, color: movActive ? 'white' : label.color, background: movActive ? label.color : 'white' }}
+                  onClick={(e) => { e.stopPropagation(); setActiveBadge(movActive ? null : { lineId: label.lineId, field: 'movement' }) }}
+                >
+                  {label.movement ? label.movement.slice(0, 3) : 'M'}
+                </button>
+                {movActive && (
+                  <div className="badge-popup">
+                    {MOVEMENT_OPTIONS.map((opt) => (
+                      <button key={opt || '__empty__'} className={`badge-popup-item${opt === label.movement ? ' active' : ''}`}
+                        onClick={(e) => { e.stopPropagation(); handleBadgeUpdate(label.lineId, 'movement', opt) }}
+                      >{opt || '—'}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
 
       {/* Context menu */}
@@ -1146,6 +1233,7 @@ function addLineGroupToCanvas(canvas: Canvas, record: LineRecord, w: number, h: 
     lockMovementY: true,
     hasControls: false,
     hasBorders: false,
+    hoverCursor: 'pointer',
   })
   ;(group as unknown as { data: object }).data = { id: record.id, type: 'line', color: record.color, yStartPx: y1Px, yEndPx: y2Px }
   canvas.add(group)

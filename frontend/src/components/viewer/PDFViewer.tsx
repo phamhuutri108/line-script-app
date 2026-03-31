@@ -237,6 +237,10 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
     setHighlightLineId(shot.line_id)
   }
 
+  function handleShotUpdated(shot: Shot) {
+    setShots((prev) => prev.map((s) => s.id === shot.id ? shot : s))
+  }
+
   return (
     <div className="viewer-shell">
       {/* Top bar */}
@@ -325,6 +329,8 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
                 onSceneMarkersChanged={() => {}}
                 onExtractSceneName={extractSceneNameAt}
                 onUndoStateChange={(u, r) => { setCanUndo(u); setCanRedo(r) }}
+                onShotUpdated={handleShotUpdated}
+                highlightLineId={highlightLineId}
               />
             )}
           </div>
