@@ -139,6 +139,19 @@
 
 .btn-logout:hover { color: var(--color-danger); }
 
+.btn-icon {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  transition: color 0.15s;
+}
+
+.btn-icon:hover { color: var(--color-primary); }
+
 /* ── Main content ── */
 .main-content {
   flex: 1;
