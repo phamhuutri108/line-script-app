@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { projectsApi, scriptsApi, inviteApi, type Project, type ProjectMember, type Script } from '../../api/projects'
 import { ApiError } from '../../api/client'
 import { useAuthStore } from '../../stores/authStore'
+import { showConfirm } from '../shared/ConfirmDialog'
 import '../layout/layout.css'
 import './project.css'
 
@@ -48,7 +49,12 @@ export default function ProjectDetailPage() {
   const canManage = isOwner || isSuperAdmin
 
   async function handleDeleteScript(scriptId: string) {
-    if (!confirm('Delete this script? This cannot be undone.')) return
+    const ok = await showConfirm({
+      title: 'Xóa script',
+      message: 'Script này sẽ bị xóa vĩnh viễn và không thể khôi phục.',
+      confirmLabel: 'Xóa',
+    })
+    if (!ok) return
     try {
       await scriptsApi.delete(token!, scriptId)
       setScripts((prev) => prev.filter((s) => s.id !== scriptId))
@@ -58,7 +64,12 @@ export default function ProjectDetailPage() {
   }
 
   async function handleRemoveMember(memberId: string) {
-    if (!confirm('Remove this member from the project?')) return
+    const ok = await showConfirm({
+      title: 'Xóa thành viên',
+      message: 'Thành viên này sẽ bị xóa khỏi project.',
+      confirmLabel: 'Xóa',
+    })
+    if (!ok) return
     try {
       await projectsApi.removeMember(token!, id!, memberId)
       setMembers((prev) => prev.filter((m) => m.id !== memberId))

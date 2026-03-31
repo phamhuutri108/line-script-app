@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { projectsApi, type Project } from '../../api/projects'
 import { ApiError } from '../../api/client'
 import { useAuthStore } from '../../stores/authStore'
+import { showConfirm } from '../shared/ConfirmDialog'
 import '../layout/layout.css'
 import './project.css'
 
@@ -50,7 +51,12 @@ export default function DashboardPage() {
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.preventDefault()
     e.stopPropagation()
-    if (!confirm('Chuyển project này vào Trash? Bạn có thể khôi phục lại trong 30 ngày.')) return
+    const ok = await showConfirm({
+      title: 'Chuyển vào Trash',
+      message: 'Project này sẽ được chuyển vào Trash. Bạn có thể khôi phục lại trong vòng 30 ngày.',
+      confirmLabel: 'Chuyển vào Trash',
+    })
+    if (!ok) return
     setDeletingId(id)
     try {
       await projectsApi.delete(token!, id)
@@ -70,7 +76,12 @@ export default function DashboardPage() {
   }
 
   async function handlePermanentDelete(id: string) {
-    if (!confirm('Xóa vĩnh viễn project này? Tất cả dữ liệu sẽ mất hoàn toàn và không thể khôi phục.')) return
+    const ok = await showConfirm({
+      title: 'Xóa vĩnh viễn',
+      message: 'Tất cả dữ liệu của project này sẽ mất hoàn toàn và không thể khôi phục.',
+      confirmLabel: 'Xóa vĩnh viễn',
+    })
+    if (!ok) return
     try {
       await projectsApi.permanentDelete(token!, id)
       setTrash((prev) => prev.filter((p) => p.id !== id))

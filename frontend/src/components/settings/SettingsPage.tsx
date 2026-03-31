@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { googleApi } from '../../api/google'
 import { ApiError } from '../../api/client'
+import { showConfirm } from '../shared/ConfirmDialog'
 import './settings.css'
 
 interface GoogleStatus {
@@ -65,7 +66,12 @@ export default function SettingsPage() {
   }
 
   async function handleDisconnect() {
-    if (!confirm('Ngắt kết nối Google? Các tính năng Sheets và Drive sẽ không hoạt động.')) return
+    const ok = await showConfirm({
+      title: 'Ngắt kết nối Google',
+      message: 'Các tính năng Sheets và Drive sẽ không hoạt động sau khi ngắt kết nối.',
+      confirmLabel: 'Ngắt kết nối',
+    })
+    if (!ok) return
     setDisconnecting(true)
     try {
       await googleApi.disconnect(token!)

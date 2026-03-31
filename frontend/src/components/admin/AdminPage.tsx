@@ -3,6 +3,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { usersApi } from '../../api/users'
 import { ApiError } from '../../api/client'
 import type { User } from '../../api/auth'
+import { showConfirm } from '../shared/ConfirmDialog'
 import './admin.css'
 
 type Tab = 'pending' | 'all'
@@ -59,7 +60,12 @@ export default function AdminPage() {
   }
 
   async function handleReject(userId: string) {
-    if (!confirm('Xóa tài khoản này?')) return
+    const ok = await showConfirm({
+      title: 'Xóa tài khoản',
+      message: 'Tài khoản này sẽ bị xóa vĩnh viễn.',
+      confirmLabel: 'Xóa',
+    })
+    if (!ok) return
     setActionId(userId)
     try {
       await usersApi.delete(token!, userId)

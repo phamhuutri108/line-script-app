@@ -14,6 +14,7 @@ import InvitePage from './components/auth/InvitePage'
 import SharePage from './components/share/SharePage'
 import SettingsPage from './components/settings/SettingsPage'
 import HomePage from './components/home/HomePage'
+import { ConfirmDialogProvider } from './components/shared/ConfirmDialog'
 
 export default function App() {
   const { token, user } = useAuthStore()
@@ -21,6 +22,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ConfirmDialogProvider />
       <Routes>
         {/* Public */}
         <Route path="/" element={<HomePage />} />

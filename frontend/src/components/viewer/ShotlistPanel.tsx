@@ -3,6 +3,7 @@ import { shotsApi, type Shot, type ShotUpdate } from '../../api/shots'
 import { useAuthStore } from '../../stores/authStore'
 import { ApiError } from '../../api/client'
 import * as XLSX from 'xlsx'
+import { showConfirm } from '../shared/ConfirmDialog'
 
 interface Props {
   scriptId: string
@@ -53,7 +54,8 @@ export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, 
   }
 
   async function handleDelete(shotId: string) {
-    if (!confirm('Delete this shot?')) return
+    const ok = await showConfirm({ title: 'Xóa shot', message: 'Shot này sẽ bị xóa vĩnh viễn.', confirmLabel: 'Xóa' })
+    if (!ok) return
     try {
       await shotsApi.delete(token!, shotId)
       setShots((prev) => prev.filter((s) => s.id !== shotId))
@@ -213,7 +215,8 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
   }
 
   async function handleStoryboardDelete() {
-    if (!confirm('Remove storyboard image?')) return
+    const ok = await showConfirm({ title: 'Xóa storyboard', message: 'Ảnh storyboard này sẽ bị xóa.', confirmLabel: 'Xóa' })
+    if (!ok) return
     await shotsApi.deleteStoryboard(token!, shot.id)
     onShotChanged({ ...shot, storyboard_drive_id: null, storyboard_view_url: null })
   }

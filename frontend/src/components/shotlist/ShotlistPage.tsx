@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { shotsApi, type Shot, type ShotUpdate } from '../../api/shots'
 import { scriptsApi, projectsApi, type Script } from '../../api/projects'
+import { showConfirm } from '../shared/ConfirmDialog'
 import { googleApi } from '../../api/google'
 import { ApiError } from '../../api/client'
 import * as XLSX from 'xlsx'
@@ -73,7 +74,8 @@ export default function ShotlistPage() {
   }
 
   async function handleDelete(shotId: string) {
-    if (!confirm('Delete this shot?')) return
+    const ok = await showConfirm({ title: 'Xóa shot', message: 'Shot này sẽ bị xóa vĩnh viễn.', confirmLabel: 'Xóa' })
+    if (!ok) return
     try {
       await shotsApi.delete(token!, shotId)
       setShots((prev) => prev.filter((s) => s.id !== shotId))
