@@ -186,6 +186,8 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   const dragStartXRef     = useRef<number>(0)
   const draggingXRef      = useRef<Record<string, number>>({})
   const draggingMarkerRef = useRef<Record<string, number>>({})
+  const linesRef          = useRef<LineRecord[]>([])
+  const yDragRef          = useRef<{ lineId: string; handle: 'start' | 'end'; startClientY: number; origYNorm: number; latestYNorm: number } | null>(null)
   const { token } = useAuthStore()
 
   const [lines, setLines] = useState<LineRecord[]>([])
@@ -194,10 +196,12 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [draggingX, setDraggingX] = useState<Record<string, number>>({})
   const [draggingMarker, setDraggingMarker] = useState<Record<string, number>>({})
+  const [draggingY, setDraggingY] = useState<Record<string, { yTop: number; yBottom: number }>>({})
   const [activeBadge, setActiveBadge] = useState<{ lineId: string; field: 'shot_type' | 'movement' } | null>(null)
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null)
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
 
+  linesRef.current = lines
   const labels = computeLabels(lines, markers, shots, width, height)
 
   // ── Undo/Redo helpers ─────────────────────────────────────────────────────
@@ -715,6 +719,11 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
         const yEndNorm = yBot / height
         const continuesNext = yEndNorm > 0.95
 
+        // Block if too close to an existing line (within 12px)
+        const MIN_X_GAP_PX = 12
+        const tooClose = linesRef.current.some((l) => Math.abs(l.x_position * width - startX) < MIN_X_GAP_PX)
+        if (tooClose) { clearPreview(canvas); drawStateRef.current = { phase: 'idle' }; return }
+
         if (!token) return
         api.post<{ line: LineRecord }>('/lines', {
           scriptId, pageNumber,
@@ -1048,6 +1057,67 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     setContextMenu(null)
   }
 
+  // ── Y-drag: label→y_start, end bracket→y_end ─────────────────────────────
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      const drag = yDragRef.current
+      if (!drag) return
+      const dy = e.clientY - drag.startClientY
+      const newYNorm = Math.max(0.01, Math.min(0.99, drag.origYNorm + dy / height))
+      drag.latestYNorm = newYNorm
+      setDraggingY((prev) => {
+        const line = linesRef.current.find((l) => l.id === drag.lineId)
+        if (!line) return prev
+        const prevEntry = prev[drag.lineId]
+        const yTop = drag.handle === 'start' ? newYNorm * height : (prevEntry?.yTop ?? line.y_start * height)
+        const yBottom = drag.handle === 'end' ? newYNorm * height : (prevEntry?.yBottom ?? line.y_end * height)
+        return { ...prev, [drag.lineId]: { yTop, yBottom } }
+      })
+    }
+    function onUp() {
+      const drag = yDragRef.current
+      if (!drag || !token) { yDragRef.current = null; return }
+      const { lineId, handle, latestYNorm } = drag
+      yDragRef.current = null
+      const line = linesRef.current.find((l) => l.id === lineId)
+      if (!line) return
+      // Update segments_json to reflect new y boundary
+      let newSegmentsJson = line.segments_json
+      if (newSegmentsJson) {
+        const segs: Array<{ type: string; y_start: number; y_end: number }> = JSON.parse(newSegmentsJson)
+        if (handle === 'start' && segs.length > 0) segs[0] = { ...segs[0], y_start: latestYNorm }
+        if (handle === 'end' && segs.length > 0) segs[segs.length - 1] = { ...segs[segs.length - 1], y_end: latestYNorm }
+        newSegmentsJson = JSON.stringify(segs)
+      }
+      const newYStart = handle === 'start' ? latestYNorm : line.y_start
+      const newYEnd = handle === 'end' ? latestYNorm : line.y_end
+      api.patch<{ line: LineRecord }>(`/lines/${lineId}`, {
+        yStart: newYStart, yEnd: newYEnd, segmentsJson: newSegmentsJson ?? undefined,
+      }, token)
+        .then((res) => {
+          setLines((prev) => prev.map((l) => l.id === lineId ? res.line : l))
+          setDraggingY((prev) => { const n = { ...prev }; delete n[lineId]; return n })
+          const canvas = fabricRef.current
+          if (canvas) {
+            const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === lineId)
+            if (obj) canvas.remove(obj)
+            addLineGroupToCanvas(canvas, res.line, width, height)
+            canvas.requestRenderAll()
+          }
+        })
+        .catch(() => {
+          setDraggingY((prev) => { const n = { ...prev }; delete n[lineId]; return n })
+        })
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [height, width, token])
+
   // ── Scene marker rename ───────────────────────────────────────────────────
 
   function handleMarkerRename(id: string, name: string) {
@@ -1138,11 +1208,19 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
         {labels.map((label) => {
           const x = draggingX[label.lineId] ?? label.x
+          const yTop = draggingY[label.lineId]?.yTop ?? label.yTop
           return (
             <div
               key={label.lineId}
               className="shot-label"
-              style={{ left: x, top: label.yTop, transform: 'translateX(-50%) translateY(-100%)', color: label.color, borderColor: label.color, pointerEvents: 'auto', cursor: 'default' }}
+              style={{ left: x, top: yTop, transform: 'translateX(-50%) translateY(-100%)', color: label.color, borderColor: label.color, pointerEvents: 'auto', cursor: 'ns-resize' }}
+              onPointerDown={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                const line = linesRef.current.find((l) => l.id === label.lineId)
+                if (!line) return
+                yDragRef.current = { lineId: label.lineId, handle: 'start', startClientY: e.clientY, origYNorm: line.y_start, latestYNorm: line.y_start }
+              }}
             >
               <span className="shot-label-num">
                 {label.sceneNum > 0 ? `${label.sceneNum}/` : ''}{label.shotNum}
@@ -1157,13 +1235,28 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
         {labels.map((label) => {
           const x = draggingX[label.lineId] ?? label.x
+          const yBottom = draggingY[label.lineId]?.yBottom ?? label.yBottom
           const typeActive = activeBadge?.lineId === label.lineId && activeBadge.field === 'shot_type'
           const movActive = activeBadge?.lineId === label.lineId && activeBadge.field === 'movement'
           return (
+            <div key={label.lineId} style={{ position: 'absolute', left: x, top: yBottom, transform: 'translateX(-50%)' }}>
+              {/* End-bracket drag grip */}
+              <div
+                style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', padding: '3px 6px', cursor: 'ns-resize', pointerEvents: 'auto' }}
+                onPointerDown={(e) => {
+                  e.stopPropagation()
+                  e.preventDefault()
+                  const line = linesRef.current.find((l) => l.id === label.lineId)
+                  if (!line) return
+                  yDragRef.current = { lineId: label.lineId, handle: 'end', startClientY: e.clientY, origYNorm: line.y_end, latestYNorm: line.y_end }
+                }}
+              >
+                <div style={{ width: 14, height: 1.5, background: label.color, borderRadius: 1 }} />
+                <div style={{ width: 14, height: 1.5, background: label.color, borderRadius: 1 }} />
+              </div>
             <div
-              key={label.lineId}
               className="shot-badges-group"
-              style={{ left: x, top: label.yBottom, transform: 'translateX(-50%) translateY(6px)' }}
+              style={{ left: 'unset', top: 'unset', position: 'relative', transform: 'none' }}
             >
               <div style={{ position: 'relative' }}>
                 <button
@@ -1201,6 +1294,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
                   </div>
                 )}
               </div>
+            </div>
             </div>
           )
         })}

@@ -132,6 +132,8 @@ async function updateLine(
     color?: string
     setupNumber?: string
     xPosition?: number
+    yStart?: number
+    yEnd?: number
     segmentsJson?: string
     continuesNextPage?: boolean
     continuesPrevPage?: boolean
@@ -143,6 +145,8 @@ async function updateLine(
       color = COALESCE(?, color),
       setup_number = COALESCE(?, setup_number),
       x_position = COALESCE(?, x_position),
+      y_start = COALESCE(?, y_start),
+      y_end = COALESCE(?, y_end),
       segments_json = COALESCE(?, segments_json),
       continues_to_next_page = COALESCE(?, continues_to_next_page),
       continues_from_prev_page = COALESCE(?, continues_from_prev_page)
@@ -151,6 +155,8 @@ async function updateLine(
     body.color ?? null,
     body.setupNumber ?? null,
     body.xPosition ?? null,
+    body.yStart ?? null,
+    body.yEnd ?? null,
     body.segmentsJson ?? null,
     body.continuesNextPage !== undefined ? (body.continuesNextPage ? 1 : 0) : null,
     body.continuesPrevPage !== undefined ? (body.continuesPrevPage ? 1 : 0) : null,
