@@ -50,6 +50,7 @@ export default function DashboardPage() {
   async function handleDelete(e: React.MouseEvent, id: string) {
     e.preventDefault()
     e.stopPropagation()
+    if (!confirm('Chuyển project này vào Trash? Bạn có thể khôi phục lại trong 30 ngày.')) return
     setDeletingId(id)
     try {
       await projectsApi.delete(token!, id)
@@ -69,6 +70,7 @@ export default function DashboardPage() {
   }
 
   async function handlePermanentDelete(id: string) {
+    if (!confirm('Xóa vĩnh viễn project này? Tất cả dữ liệu sẽ mất hoàn toàn và không thể khôi phục.')) return
     try {
       await projectsApi.permanentDelete(token!, id)
       setTrash((prev) => prev.filter((p) => p.id !== id))
