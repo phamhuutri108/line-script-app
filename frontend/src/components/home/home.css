@@ -1,0 +1,83 @@
+.home-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg);
+  padding: 2rem;
+}
+
+.home-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2.5rem;
+  text-align: center;
+}
+
+.home-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.home-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+}
+
+.home-logo h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-primary);
+  letter-spacing: -0.5px;
+}
+
+.home-logo p {
+  font-size: 0.95rem;
+  color: var(--color-text-muted);
+}
+
+.home-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.home-btn-primary {
+  padding: 0.65rem 1.75rem;
+  background: var(--color-primary);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+
+.home-btn-primary:hover {
+  background: var(--color-primary-hover);
+}
+
+.home-btn-secondary {
+  padding: 0.65rem 1.75rem;
+  background: transparent;
+  color: var(--color-text);
+  text-decoration: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  transition: border-color 0.15s;
+}
+
+.home-btn-secondary:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.home-note {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}

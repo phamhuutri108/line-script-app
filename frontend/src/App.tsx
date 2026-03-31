@@ -13,6 +13,7 @@ import AdminPage from './components/admin/AdminPage'
 import InvitePage from './components/auth/InvitePage'
 import SharePage from './components/share/SharePage'
 import SettingsPage from './components/settings/SettingsPage'
+import HomePage from './components/home/HomePage'
 
 export default function App() {
   const { token, user } = useAuthStore()
@@ -22,6 +23,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         {/* Public */}
+        <Route path="/" element={<HomePage />} />
         <Route path="/login" element={isAuth ? <Navigate to="/dashboard" replace /> : <LoginPage />} />
         <Route path="/register" element={isAuth ? <Navigate to="/dashboard" replace /> : <RegisterPage />} />
         <Route path="/pending" element={<PendingPage />} />
@@ -52,7 +54,7 @@ export default function App() {
         </Route>
 
         {/* Catch-all */}
-        <Route path="*" element={<Navigate to={isAuth ? '/dashboard' : '/login'} replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   )
