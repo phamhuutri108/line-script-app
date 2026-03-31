@@ -6,24 +6,11 @@ export async function handleLines(request: Request, env: Env): Promise<Response>
   const user = await verifyAuth(request, env)
   const url = new URL(request.url)
   const parts = url.pathname.replace(/^\/lines/, '').split('/').filter(Boolean)
-  // parts[0] = lineId
 
-  // GET /lines?scriptId=&page=
-  if (request.method === 'GET' && parts.length === 0) {
-    return getLines(url, user, env)
-  }
-  // POST /lines
-  if (request.method === 'POST' && parts.length === 0) {
-    return createLine(request, user, env)
-  }
-  // DELETE /lines/:id
-  if (request.method === 'DELETE' && parts.length === 1) {
-    return deleteLine(parts[0], user, env)
-  }
-  // PATCH /lines/:id  (update color, setup_number)
-  if (request.method === 'PATCH' && parts.length === 1) {
-    return updateLine(parts[0], request, user, env)
-  }
+  if (request.method === 'GET' && parts.length === 0) return getLines(url, user, env)
+  if (request.method === 'POST' && parts.length === 0) return createLine(request, user, env)
+  if (request.method === 'DELETE' && parts.length === 1) return deleteLine(parts[0], user, env)
+  if (request.method === 'PATCH' && parts.length === 1) return updateLine(parts[0], request, user, env)
 
   return jsonResponse({ error: 'Not found' }, 404)
 }
@@ -35,11 +22,10 @@ async function getLines(
 ): Promise<Response> {
   const scriptId = url.searchParams.get('scriptId')
   const page = url.searchParams.get('page')
-  const userId = url.searchParams.get('userId') // super_admin can filter by user
+  const userId = url.searchParams.get('userId')
 
   if (!scriptId) return jsonResponse({ error: 'scriptId is required' }, 400)
 
-  // Verify script access
   const access = await checkScriptAccess(scriptId, user.sub, env)
   if (!access && !isSuperAdmin(user)) return jsonResponse({ error: 'Forbidden' }, 403)
 
@@ -47,27 +33,23 @@ async function getLines(
   let bindings: (string | number)[]
 
   if (isSuperAdmin(user) && userId) {
-    // Super admin viewing a specific user's lines
     query = page
       ? 'SELECT * FROM script_lines WHERE script_id = ? AND user_id = ? AND page_number = ? ORDER BY created_at ASC'
       : 'SELECT * FROM script_lines WHERE script_id = ? AND user_id = ? ORDER BY page_number ASC, created_at ASC'
     bindings = page ? [scriptId, userId, parseInt(page)] : [scriptId, userId]
   } else if (isSuperAdmin(user)) {
-    // Super admin viewing all users' lines (layer view)
     query = page
       ? 'SELECT sl.*, u.name AS user_name FROM script_lines sl JOIN users u ON u.id = sl.user_id WHERE sl.script_id = ? AND sl.page_number = ? ORDER BY sl.created_at ASC'
       : 'SELECT sl.*, u.name AS user_name FROM script_lines sl JOIN users u ON u.id = sl.user_id WHERE sl.script_id = ? ORDER BY sl.page_number ASC, sl.created_at ASC'
     bindings = page ? [scriptId, parseInt(page)] : [scriptId]
   } else {
-    // Regular user: only their own lines
     query = page
       ? 'SELECT * FROM script_lines WHERE script_id = ? AND user_id = ? AND page_number = ? ORDER BY created_at ASC'
       : 'SELECT * FROM script_lines WHERE script_id = ? AND user_id = ? ORDER BY page_number ASC, created_at ASC'
     bindings = page ? [scriptId, user.sub, parseInt(page)] : [scriptId, user.sub]
   }
 
-  const stmt = env.DB.prepare(query)
-  const result = await stmt.bind(...bindings).all()
+  const result = await env.DB.prepare(query).bind(...bindings).all()
   return jsonResponse({ lines: result.results })
 }
 
@@ -79,22 +61,22 @@ async function createLine(
   let body: {
     scriptId?: string
     pageNumber?: number
-    lineType?: string
     xPosition?: number
     yStart?: number
     yEnd?: number
     color?: string
-    setupNumber?: number
+    segmentsJson?: string
+    continuesNextPage?: boolean
+    setupNumber?: string
+    // lineType kept for backwards compat but ignored — segments_json is source of truth
+    lineType?: string
   }
   try { body = await request.json() } catch { return jsonResponse({ error: 'Invalid JSON' }, 400) }
 
-  const { scriptId, pageNumber, lineType, xPosition, yStart, yEnd, color, setupNumber } = body
+  const { scriptId, pageNumber, xPosition, yStart, yEnd, color, segmentsJson, continuesNextPage, setupNumber } = body
 
-  if (!scriptId || pageNumber === undefined || !lineType || xPosition === undefined || yStart === undefined || yEnd === undefined) {
-    return jsonResponse({ error: 'scriptId, pageNumber, lineType, xPosition, yStart, yEnd are required' }, 400)
-  }
-  if (lineType !== 'solid' && lineType !== 'dashed') {
-    return jsonResponse({ error: 'lineType must be solid or dashed' }, 400)
+  if (!scriptId || pageNumber === undefined || xPosition === undefined || yStart === undefined || yEnd === undefined) {
+    return jsonResponse({ error: 'scriptId, pageNumber, xPosition, yStart, yEnd are required' }, 400)
   }
   if (xPosition < 0 || xPosition > 1 || yStart < 0 || yStart > 1 || yEnd < 0 || yEnd > 1) {
     return jsonResponse({ error: 'Coordinates must be normalized (0-1)' }, 400)
@@ -103,15 +85,32 @@ async function createLine(
   const access = await checkScriptAccess(scriptId, user.sub, env)
   if (!access && !isSuperAdmin(user)) return jsonResponse({ error: 'Forbidden' }, 403)
 
+  // Auto-detect if this line is a continuation from the previous page
+  let continuesFromPrev = 0
+  if (pageNumber > 1) {
+    const prevLine = await env.DB.prepare(
+      `SELECT id FROM script_lines
+       WHERE script_id = ? AND user_id = ? AND page_number = ?
+         AND continues_to_next_page = 1
+         AND ABS(x_position - ?) < 0.03
+       LIMIT 1`
+    ).bind(scriptId, user.sub, pageNumber - 1, xPosition).first()
+    if (prevLine) continuesFromPrev = 1
+  }
+
   const id = generateId()
   await env.DB.prepare(
     `INSERT INTO script_lines
-      (id, script_id, user_id, page_number, line_type, x_position, y_start, y_end, color, setup_number)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      (id, script_id, user_id, page_number, line_type, x_position, y_start, y_end,
+       color, segments_json, continues_to_next_page, continues_from_prev_page, setup_number)
+     VALUES (?, ?, ?, ?, 'solid', ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
-    id, scriptId, user.sub, pageNumber, lineType,
+    id, scriptId, user.sub, pageNumber,
     xPosition, yStart, yEnd,
     color ?? '#000000',
+    segmentsJson ?? null,
+    continuesNextPage ? 1 : 0,
+    continuesFromPrev,
     setupNumber ?? null,
   ).run()
 
@@ -129,16 +128,34 @@ async function updateLine(
   if (!line) return jsonResponse({ error: 'Line not found' }, 404)
   if (!isSuperAdmin(user) && line.user_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)
 
-  let body: { color?: string; setupNumber?: number; lineType?: string }
+  let body: {
+    color?: string
+    setupNumber?: string
+    xPosition?: number
+    segmentsJson?: string
+    continuesNextPage?: boolean
+    continuesPrevPage?: boolean
+  }
   try { body = await request.json() } catch { return jsonResponse({ error: 'Invalid JSON' }, 400) }
 
   await env.DB.prepare(
     `UPDATE script_lines SET
       color = COALESCE(?, color),
       setup_number = COALESCE(?, setup_number),
-      line_type = COALESCE(?, line_type)
+      x_position = COALESCE(?, x_position),
+      segments_json = COALESCE(?, segments_json),
+      continues_to_next_page = COALESCE(?, continues_to_next_page),
+      continues_from_prev_page = COALESCE(?, continues_from_prev_page)
      WHERE id = ?`
-  ).bind(body.color ?? null, body.setupNumber ?? null, body.lineType ?? null, lineId).run()
+  ).bind(
+    body.color ?? null,
+    body.setupNumber ?? null,
+    body.xPosition ?? null,
+    body.segmentsJson ?? null,
+    body.continuesNextPage !== undefined ? (body.continuesNextPage ? 1 : 0) : null,
+    body.continuesPrevPage !== undefined ? (body.continuesPrevPage ? 1 : 0) : null,
+    lineId,
+  ).run()
 
   const updated = await env.DB.prepare('SELECT * FROM script_lines WHERE id = ?').bind(lineId).first()
   return jsonResponse({ line: updated })

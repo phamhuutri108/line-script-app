@@ -6,11 +6,13 @@ export interface Shot {
   line_id: string | null
   user_id: string
   shot_number: number
+  page_number: number | null
   scene_number: string | null
   location: string | null
   int_ext: string | null
   day_night: string | null
-  description: string | null
+  description: string | null       // auto-extracted from PDF (shown blurred in UI)
+  user_notes: string | null        // user-written notes — the primary editable description
   dialogue: string | null
   shot_size: string | null
   angle: string | null
@@ -29,7 +31,7 @@ export interface Shot {
 
 export type ShotUpdate = Partial<Pick<Shot,
   'scene_number' | 'location' | 'int_ext' | 'day_night' |
-  'description' | 'dialogue' | 'subjects' | 'script_time' |
+  'description' | 'user_notes' | 'dialogue' | 'subjects' | 'script_time' |
   'shot_size' | 'shot_type' | 'side' | 'angle' |
   'movement' | 'lens' | 'notes' | 'shot_number'
 >>
@@ -48,6 +50,7 @@ export const shotsApi = {
     description?: string
     dialogue?: string
     pageNumber?: number
+    userNotes?: string
   }) => api.post<{ shot: Shot }>('/shots', data, token),
 
   update: (token: string, id: string, data: ShotUpdate) =>

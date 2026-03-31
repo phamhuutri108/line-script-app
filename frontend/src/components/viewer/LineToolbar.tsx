@@ -2,7 +2,7 @@ import { useRef } from 'react'
 
 export interface LineToolState {
   mode: 'select' | 'draw' | 'scene'
-  lineType: 'solid' | 'dashed'
+  initialSegType: 'straight' | 'zigzag'  // initial segment type when starting to draw
   color: string
 }
 
@@ -26,7 +26,7 @@ export default function LineToolbar({ state, onChange }: Props) {
       <button
         className={`tool-btn${state.mode === 'select' ? ' active' : ''}`}
         onClick={() => set({ mode: 'select' })}
-        title="Select / Edit (V)"
+        title="Select / Move (V)"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <path d="M5 3l14 9-7 1-4 7z" />
@@ -37,10 +37,12 @@ export default function LineToolbar({ state, onChange }: Props) {
       <button
         className={`tool-btn${state.mode === 'draw' ? ' active' : ''}`}
         onClick={() => set({ mode: 'draw' })}
-        title="Draw shot line (L)"
+        title="Draw shot line (L) — click start, click end"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
           <line x1="12" y1="3" x2="12" y2="21" />
+          <line x1="8" y1="3" x2="16" y2="3" />
+          <line x1="8" y1="21" x2="16" y2="21" />
         </svg>
       </button>
 
@@ -59,25 +61,25 @@ export default function LineToolbar({ state, onChange }: Props) {
 
       <div className="tool-divider" />
 
-      {/* Solid line */}
+      {/* Straight segment (initial) */}
       <button
-        className={`tool-btn${state.lineType === 'solid' ? ' active' : ''}`}
-        onClick={() => set({ lineType: 'solid', mode: 'draw' })}
-        title="Solid line (single coverage)"
+        className={`tool-btn${state.initialSegType === 'straight' ? ' active' : ''}`}
+        onClick={() => set({ initialSegType: 'straight', mode: 'draw' })}
+        title="Start with straight segment (on-screen)"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
           <line x1="12" y1="3" x2="12" y2="21" />
         </svg>
       </button>
 
-      {/* Dashed line */}
+      {/* Zigzag segment (initial) */}
       <button
-        className={`tool-btn${state.lineType === 'dashed' ? ' active' : ''}`}
-        onClick={() => set({ lineType: 'dashed', mode: 'draw' })}
-        title="Dashed line (multi coverage)"
+        className={`tool-btn${state.initialSegType === 'zigzag' ? ' active' : ''}`}
+        onClick={() => set({ initialSegType: 'zigzag', mode: 'draw' })}
+        title="Start with zigzag segment (off-screen / VO)"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeDasharray="4 3">
-          <line x1="12" y1="3" x2="12" y2="21" />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+          <polyline points="12,3 16,7 8,11 16,15 8,19 12,21" />
         </svg>
       </button>
 
@@ -125,6 +127,13 @@ export default function LineToolbar({ state, onChange }: Props) {
           onChange={(e) => set({ color: e.target.value })}
         />
       </button>
+
+      {/* Tab hint during draw */}
+      {state.mode === 'draw' && (
+        <div className="tool-tab-hint" title="Press Tab while drawing to toggle straight/zigzag segment">
+          Tab
+        </div>
+      )}
     </div>
   )
 }

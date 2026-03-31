@@ -8,6 +8,7 @@ interface Props {
   scriptId: string
   highlightLineId?: string | null
   onShotClick?: (shot: Shot) => void
+  onJumpToLine?: (lineId: string, pageNum: number) => void
   refreshTrigger?: number
 }
 
@@ -19,7 +20,7 @@ const DAY_NIGHT_OPTIONS = ['', 'DAY', 'NIGHT', 'DAWN', 'DUSK']
 const SHOT_TYPE_OPTIONS = ['', 'Single', 'Two', 'Three', 'Group', 'Observe', 'Insert', 'POV', 'OTS']
 const SIDE_OPTIONS = ['', 'L', 'R', 'L/R']
 
-export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, refreshTrigger }: Props) {
+export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, onJumpToLine, refreshTrigger }: Props) {
   const { token } = useAuthStore()
   const [shots, setShots] = useState<Shot[]>([])
   const [loading, setLoading] = useState(true)
@@ -164,6 +165,7 @@ export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, 
               onUpdate={(data) => handleUpdate(shot.id, data)}
               onDelete={() => handleDelete(shot.id)}
               onClick={() => onShotClick?.(shot)}
+              onJumpToLine={shot.line_id && shot.page_number ? () => onJumpToLine?.(shot.line_id!, shot.page_number!) : undefined}
               onShotChanged={(updated) => setShots((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
             />
           ))
@@ -182,10 +184,11 @@ interface RowProps {
   onUpdate: (data: ShotUpdate) => void
   onDelete: () => void
   onClick: () => void
+  onJumpToLine?: () => void
   onShotChanged: (updated: Shot) => void
 }
 
-function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, onDelete, onClick, onShotChanged }: RowProps) {
+function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, onDelete, onClick, onJumpToLine, onShotChanged }: RowProps) {
   const { token } = useAuthStore()
   const [draft, setDraft] = useState<ShotUpdate>({})
   const [uploading, setUploading] = useState(false)
@@ -270,6 +273,17 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
             style={{ width: 36, height: 27, objectFit: 'cover', borderRadius: '3px', flexShrink: 0, border: '1px solid var(--color-border)' }}
           />
         )}
+        {onJumpToLine && (
+          <button
+            className="jump-to-line-btn"
+            title="Đến kịch bản"
+            onClick={(e) => { e.stopPropagation(); onJumpToLine() }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </button>
+        )}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-text-muted)" strokeWidth={2}
           style={{ transform: isEditing ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s', flexShrink: 0 }}>
           <polyline points="6 9 12 15 18 9" />
@@ -285,7 +299,28 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
             <ShotSelect label="INT/EXT" options={INT_EXT_OPTIONS} value={val('int_ext')} onChange={(v) => set('int_ext', v)} />
             <ShotSelect label="Day/Night" options={DAY_NIGHT_OPTIONS} value={val('day_night')} onChange={(v) => set('day_night', v)} />
           </div>
-          <ShotField label="Description" value={val('description')} onChange={(v) => set('description', v)} multiline />
+          {/* Two-part description */}
+          <div>
+            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Ghi chú</div>
+            <textarea
+              value={(draft['user_notes'] !== undefined ? draft['user_notes'] : shot.user_notes) ?? ''}
+              onChange={(e) => set('user_notes', e.target.value)}
+              placeholder="Ghi chú của bạn về shot này…"
+              style={{
+                width: '100%', background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                borderRadius: '6px', padding: '0.4rem 0.5rem', color: 'var(--color-text)',
+                fontSize: '0.78rem', outline: 'none', resize: 'vertical', minHeight: '54px', fontFamily: 'inherit',
+              }}
+            />
+          </div>
+          {shot.description && (
+            <div className="auto-description-block">
+              <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginBottom: '2px' }}>
+                Trích từ kịch bản
+              </div>
+              <div className="auto-description-text">{shot.description}</div>
+            </div>
+          )}
           <ShotField label="Dialogue" value={val('dialogue')} onChange={(v) => set('dialogue', v)} multiline />
           <ShotField label="Subjects" value={val('subjects')} onChange={(v) => set('subjects', v)} placeholder="Characters in frame" />
           <ShotField label="Script Time" value={val('script_time')} onChange={(v) => set('script_time', v)} placeholder="00:30" />

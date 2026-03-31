@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { Link } from 'react-router-dom'
-import ScriptCanvas, { type LineCreatedInfo } from './ScriptCanvas'
+import ScriptCanvas, { type LineCreatedInfo, type Segment } from './ScriptCanvas'
 import LineToolbar, { type LineToolState } from './LineToolbar'
 import ShotlistPanel from './ShotlistPanel'
 import { shotsApi, type Shot } from '../../api/shots'
@@ -35,7 +35,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
   const [rendering, setRendering] = useState(false)
   const [toolState, setToolState] = useState<LineToolState>({
     mode: 'select',
-    lineType: 'solid',
+    initialSegType: 'straight',
     color: '#e05c5c',
   })
   const [shotRefresh, setShotRefresh] = useState(0)
@@ -102,10 +102,13 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
         (item) => item.transform && item.str.trim()
       )
 
+      // Only include text in STRAIGHT segments — zigzag = off-screen, no description
+      const straightRanges: Segment[] = info.segments.filter((s) => s.type === 'straight')
+
       // Normalize y coords (PDF y is bottom-up, flip to top-down)
       const inRange = items.filter((item) => {
         const yNorm = 1 - item.transform[5] / viewport.height
-        return yNorm >= info.yStart && yNorm <= info.yEnd
+        return straightRanges.some((seg) => yNorm >= seg.y_start && yNorm <= seg.y_end)
       })
 
       // Detect scene header: starts with INT. / EXT. / INT/EXT
@@ -201,9 +204,13 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
     })
   }
 
+  function handleJumpToLine(lineId: string, pageNum: number) {
+    if (pageNum && pageNum !== currentPage) goToPage(pageNum)
+    setHighlightLineId(lineId)
+  }
+
   function handleShotClick(shot: Shot) {
     setHighlightLineId(shot.line_id)
-    // Navigate to the page the shot is on (future enhancement)
   }
 
   return (
@@ -293,6 +300,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
           scriptId={scriptId}
           highlightLineId={highlightLineId}
           onShotClick={handleShotClick}
+          onJumpToLine={handleJumpToLine}
           refreshTrigger={shotRefresh}
         />
       </div>
