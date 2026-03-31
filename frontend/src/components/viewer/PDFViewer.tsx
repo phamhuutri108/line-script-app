@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { Link } from 'react-router-dom'
-import ScriptCanvas, { type LineCreatedInfo, type Segment } from './ScriptCanvas'
+import ScriptCanvas, { type LineCreatedInfo, type Segment, type ScriptCanvasHandle } from './ScriptCanvas'
 import LineToolbar, { type LineToolState } from './LineToolbar'
 import ShotlistPanel from './ShotlistPanel'
 import { shotsApi, type Shot } from '../../api/shots'
@@ -25,6 +25,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
   const renderTaskRef = useRef<pdfjsLib.RenderTask | null>(null)
+  const scriptCanvasRef = useRef<ScriptCanvasHandle>(null)
   const { token } = useAuthStore()
 
   const [numPages, setNumPages] = useState(0)
@@ -41,6 +42,8 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
   const [shotRefresh, setShotRefresh] = useState(0)
   const [shots, setShots] = useState<Shot[]>([])
   const [highlightLineId, setHighlightLineId] = useState<string | null>(null)
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
 
   useEffect(() => {
     if (!token) return
@@ -180,6 +183,27 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
     }
   }, [currentPage, scriptId, token])
 
+  // Extract scene header text (INT./EXT.) near a given normalized y-position
+  const extractSceneNameAt = useCallback(async (yNorm: number): Promise<string> => {
+    const doc = pdfDocRef.current
+    if (!doc) return ''
+    try {
+      const page = await doc.getPage(currentPage)
+      const textContent = await page.getTextContent()
+      const viewport = page.getViewport({ scale: 1 })
+      type TextItem = { str: string; transform: number[] }
+      const items = (textContent.items as TextItem[]).filter((item) => item.transform && item.str.trim())
+      // Find INT./EXT. line within ±5% of yNorm
+      const match = items.find((item) => {
+        const yItem = 1 - item.transform[5] / viewport.height
+        return Math.abs(yItem - yNorm) < 0.05 && /^(INT\.|EXT\.|INT\/EXT)/i.test(item.str.trim())
+      })
+      return match?.str.trim() ?? ''
+    } catch {
+      return ''
+    }
+  }, [currentPage])
+
   function goToPage(p: number) {
     const clamped = Math.max(1, Math.min(numPages, p))
     setCurrentPage(clamped)
@@ -272,7 +296,14 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
 
       {/* Body */}
       <div className="viewer-body">
-        <LineToolbar state={toolState} onChange={setToolState} />
+        <LineToolbar
+          state={toolState}
+          onChange={setToolState}
+          onUndo={() => scriptCanvasRef.current?.undo()}
+          onRedo={() => scriptCanvasRef.current?.redo()}
+          canUndo={canUndo}
+          canRedo={canRedo}
+        />
 
         <div className="canvas-area">
           {rendering && canvasSize.width === 0 && (
@@ -282,6 +313,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
             <canvas ref={pdfCanvasRef} className="pdf-canvas" />
             {canvasSize.width > 0 && (
               <ScriptCanvas
+                ref={scriptCanvasRef}
                 width={canvasSize.width}
                 height={canvasSize.height}
                 scriptId={scriptId}
@@ -291,6 +323,8 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
                 onLineCreated={extractTextForLine}
                 onLineDeleted={() => setShotRefresh((n) => n + 1)}
                 onSceneMarkersChanged={() => {}}
+                onExtractSceneName={extractSceneNameAt}
+                onUndoStateChange={(u, r) => { setCanUndo(u); setCanRedo(r) }}
               />
             )}
           </div>

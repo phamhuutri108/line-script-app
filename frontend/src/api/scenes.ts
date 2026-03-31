@@ -7,6 +7,7 @@ export interface SceneMarker {
   page_number: number
   y_position: number
   x_offset: number
+  name: string | null
   created_at: number
 }
 
@@ -19,9 +20,10 @@ export const scenesApi = {
     pageNumber: number
     yPosition: number
     xOffset?: number
+    name?: string
   }) => api.post<{ marker: SceneMarker }>('/scenes', data, token),
 
-  update: (token: string, id: string, data: { yPosition?: number; xOffset?: number }) =>
+  update: (token: string, id: string, data: { yPosition?: number; xOffset?: number; name?: string }) =>
     api.patch<{ marker: SceneMarker }>(`/scenes/${id}`, data, token),
 
   delete: (token: string, id: string) =>

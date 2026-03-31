@@ -211,67 +211,147 @@ CREATE TABLE google_tokens (
 
 ---
 
-## Line Script — Spec Chi Tiết (ĐÃ CHỐT 2026-03-31)
+## Line Script — Spec Chi Tiết (ĐÃ CHỐT 2026-03-31, CẬP NHẬT 2026-03-31)
+
+### Input / Device Compatibility — QUAN TRỌNG
+
+App phải hoạt động đồng nhất trên cả 3 thiết bị:
+
+| Thiết bị | Click/Tap | Context menu | Move |
+|---|---|---|---|
+| Desktop (mouse) | click chuột trái | right-click | drag chuột |
+| iPad (touch) | tap | long-press ~500ms | drag ngón tay |
+| iPad (Apple Pencil) | tap bút | long-press bút | drag bút |
+
+**Nguyên tắc xử lý event:**
+- Dùng **Pointer Events API** thống nhất (`pointerdown`, `pointermove`, `pointerup`) — không dùng riêng touch/mouse events
+- Context menu: `contextmenu` event cho desktop, `long-press` (pointerdown hold > 500ms, không move) cho iPad
+- Fabric.js: `canvas.allowTouchScrolling = false` trên iPad để tránh cuộn trang khi vẽ
+- KHÔNG phân biệt `pointerType === 'mouse'` vs `'touch'` vs `'pen'` trừ khi cần thiết
+
+---
 
 ### Drawing Model: Click-Click (không phải drag)
 
-1. **Click lần 1** → Shot box label (24, 24A...) + Start Bracket Mark xuất hiện tại điểm click
-2. **Di chuột** → Ghost line preview theo chiều dọc (X cố định, không chéo)
-3. **Tab key** (trong lúc preview) → toggle segment type straight ↔ zigzag giữa chừng → Bracket Mark tự chèn tại điểm chuyển
-4. **Click lần 2** → Line được vẽ + End Bracket Mark ở dưới
-   - Nếu y_end > ~95% page → thay End Bracket bằng **↓ arrow**, đánh dấu `continues_to_next_page = true`
+1. **Click/Tap lần 1** → Label box (1/1, 1A...) xuất hiện ở đầu line, là điểm bắt đầu (không có start bracket riêng — label box ĐÃ là marker đầu)
+2. **Di chuột/ngón tay** → Ghost line preview theo chiều dọc (X cố định)
+3. **Tab key / nút Split trên toolbar** → toggle segment type straight ↔ zigzag → Bracket Mark tự chèn
+4. **Click/Tap lần 2** → Line hoàn thành + End Bracket ở dưới
+   - Nếu y_end > ~95% page → ↓ arrow thay End Bracket, `continues_to_next_page = true`
 
 ### Continuation Across Pages
 
-- Khi vẽ line trên trang N+1 tại x_position ±3% so với line `continues_to_next_page = true` trên trang N → app auto-detect là continuation, set `continues_from_prev_page = true`
-- Vì mỗi line được vẽ ở thời điểm khác nhau, không có trùng lặp x_position → detection an toàn
-- Line continuation: không có Start Bracket ở trên (thay bằng ↑ indicator hoặc không có gì)
+- x_position ±3% match với line `continues_to_next_page = true` trang trước → auto-detect continuation
+- Line continuation: không có label box trên đầu (hoặc ↑ nhỏ)
 
-### Post-Draw Editing
+### Post-Draw Editing — Select Mode
 
-- **Move ngang**: Trong select mode, kéo line trái/phải (chỉ X, khóa Y). Sau drag → PATCH API cập nhật `x_position`
-- **Thêm segment break**: Right-click vào line → "Thêm break tại đây" → Bracket Mark chèn vào, segment phía dưới đổi kiểu (straight ↔ zigzag)
-- **Xóa**: Right-click → "Xóa line + shot"
+- **Move ngang**: kéo line trái/phải (lockMovementY) — PATCH API `x_position`
+  - Desktop: drag chuột; iPad: drag ngón tay/bút
+- **Visual khi chọn line**: Hiển thị dashed circular handles tại endpoint đầu và cuối (giống tham chiếu ảnh). Opacity ring xung quanh endpoint.
+- **Split**: 
+  - Desktop: right-click → "Split" trong context menu
+  - iPad: long-press → context menu → "Split"
+  - Toolbar: nút "Split" → click vào điểm trên line → tách segment tại đó
+- **Xóa**: right-click/long-press → "Xóa line + shot"
+- **Undo/Redo**: Cmd+Z / Cmd+Shift+Z (desktop) + 2 nút visual trên toolbar
+
+### Shot Label Box — Visual Design
+
+```
+┌─────┐
+│ 1/1 │  ← nền trắng, border màu line, text màu line, font lớn hơn (14px+)
+│  W  │  ← shot_size (nếu có)
+└──┬──┘
+   │    ← line bắt đầu từ đây (label IS the start point)
+   │
+```
+
+- Nằm TRÊN ĐỈNH line (không có start bracket riêng)
+- Di chuyển CÙNG với line khi kéo ngang
+- Format: `sceneNum/shotNum` (e.g. "1/1") trên canvas
+- Bên Shotlist tab: vẫn hiển thị đầy đủ scene info
+- Bên line script canvas: chỉ hiện shot order number
 
 ### Visual Rendering
 
 | Element | Mô tả |
 |---|---|
-| Line stroke | strokeWidth: **4.5** (tăng từ 2.5) |
+| Line stroke | strokeWidth: **~2px** (mỏng, giống chuẩn ngành) |
 | Straight segment | Đường thẳng liền nét |
-| Zigzag segment | Custom SVG path `/\/\/\/` — **không** phải dashes |
-| Start Bracket | Gạch ngang ~12px tại y_start |
-| End Bracket | Gạch ngang ~12px tại y_end |
-| Transition Bracket | Gạch ngang ~12px tại điểm chuyển giữa segments |
-| Continues ↓ | Mũi tên xuống thay End Bracket khi `continues_to_next_page = true` |
-| Shot label | Ô vuông nhỏ bên cạnh Start Bracket: "24", "24A"... |
+| Zigzag segment | Custom SVG path `/\/\/\/` |
+| Start | Label box (không có bracket riêng) |
+| End Bracket | Gạch ngang ~10px tại y_end |
+| Transition Bracket | Gạch ngang ~10px tại điểm chuyển |
+| Continues ↓ | Mũi tên xuống khi `continues_to_next_page = true` |
+| Selection visual | Dashed circular handle (opacity ring) tại endpoints khi selected |
 
 ### Zigzag = Không lấy text vào description
 
-- Khi extract text từ PDF, chỉ lấy text trong các đoạn y-range thuộc **straight** segments
-- Đoạn zigzag bị bỏ qua hoàn toàn (ý nghĩa: camera quay bao gồm nhưng không lấy nội dung)
+- Extract text chỉ từ **straight** segments — zigzag bị bỏ qua
 
 ---
 
-## Shotlist — Spec Chi Tiết (ĐÃ CHỐT 2026-03-31)
+### Toolbar Tools (ĐÃ CHỐT)
+
+| Tool | Phím tắt | Mô tả |
+|---|---|---|
+| Select | V | Chọn/move line, hiện handles. Ẩn straight/zigzag buttons. |
+| Draw | L | Click-click vẽ line |
+| Split | - | Click vào line đang có → tách segment tại điểm đó |
+| Scene | S | Thêm scene marker ngang |
+| Text | T | Thêm text annotation box (draggable, resizable, color options) |
+| Straight | - | Initial segment type = straight (ẩn khi Select mode) |
+| Zigzag | - | Initial segment type = zigzag (ẩn khi Select mode) |
+| Colors | - | 6 preset + custom color picker |
+| Undo | Cmd+Z | Undo action cuối |
+| Redo | Cmd+Shift+Z | Redo |
+
+### Scene Marker — Visual Design
+
+Đường ngang chạy ngang trang, gồm:
+- Dashed horizontal line suốt chiều rộng trang
+- Bên trái: box nhỏ "1/1 W" (scene/shot + shot size) có thể drag ngang
+- Kế đó: số cảnh (1, 2...)  
+- Kế đó: tên cảnh auto-extract từ PDF (INT./EXT. format)
+
+### Text Annotation Tool
+
+- Thêm text box tự do lên PDF canvas
+- Draggable (kéo bất cứ đâu)
+- Resizable (kéo góc để resize)
+- Chọn được màu chữ
+- Gõ text vào trong
+- Lưu vào `annotations` table (type = 'drawing', fabric_json)
+- Có thể xóa qua right-click/long-press
+
+---
+
+## Shotlist — Spec Chi Tiết (ĐÃ CHỐT 2026-03-31, CẬP NHẬT 2026-03-31)
+
+### Shot numbering
+
+- **Canvas label**: hiện `sceneNum/shotNum` theo vị trí line trên trang (computed client-side)
+- **Shotlist tab (ShotlistPanel)**: hiện đầy đủ scene info (scene_number, location, INT/EXT...)
+- Khi vẽ line xong, shot tự động được tạo với shot_number đúng thứ tự — không hiện "Untitled" nữa
+  - Header shotlist item hiện: `Shot [shot_number]` nếu chưa có scene_number
+  - Khi user fill vào scene_number → hiện đầy đủ
 
 ### Description 2 phần
 
-**Phần 1 — Auto (từ PDF):**
-- Lưu trong field `description` (DB)
-- Hiển thị mờ/blur trong shotlist
-- Max-height giới hạn (không làm shotlist cao thêm), không expand
-- Người dùng KHÔNG thể edit trực tiếp (chỉ đọc)
+**Phần 1 — Auto (từ PDF, chỉ straight segments):**
+- Field `description` (DB) — hiển thị blur/mờ, read-only, max-height giới hạn, hover để unblur
 
 **Phần 2 — User notes (phần chính):**
-- Lưu trong field `user_notes` (DB)
-- Ô nhập chính, nằm trên, editable
-- Đây là phần nổi bật trong UI
+- Field `user_notes` (DB) — editable, hiển thị nổi bật
 
 ### Nút "→ Đến kịch bản"
+- Click → navigate đến đúng page + flash highlight line trên canvas
 
-- Mỗi shot item trong ShotlistPanel có nút này
-- Click → scroll PDFViewer đến đúng page của line đó + highlight line trên canvas
+### Undo/Redo
+- Cmd+Z / Cmd+Shift+Z
+- 2 nút visual (↩ ↪) trên toolbar
+- Stack lưu: thêm line, xóa line, move line, add segment break, add annotation
 
 ---
 

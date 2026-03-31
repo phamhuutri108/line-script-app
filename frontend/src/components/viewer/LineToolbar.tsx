@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 
 export interface LineToolState {
-  mode: 'select' | 'draw' | 'scene'
+  mode: 'select' | 'draw' | 'scene' | 'split' | 'text'
   initialSegType: 'straight' | 'zigzag'  // initial segment type when starting to draw
   color: string
 }
@@ -9,11 +9,15 @@ export interface LineToolState {
 interface Props {
   state: LineToolState
   onChange: (s: LineToolState) => void
+  onUndo?: () => void
+  onRedo?: () => void
+  canUndo?: boolean
+  canRedo?: boolean
 }
 
 const PRESET_COLORS = ['#e05c5c', '#5c8ae0', '#5ce08a', '#e0c45c', '#c45ce0', '#000000']
 
-export default function LineToolbar({ state, onChange }: Props) {
+export default function LineToolbar({ state, onChange, onUndo, onRedo, canUndo, canRedo }: Props) {
   const colorInputRef = useRef<HTMLInputElement>(null)
 
   function set(partial: Partial<LineToolState>) {
@@ -46,6 +50,20 @@ export default function LineToolbar({ state, onChange }: Props) {
         </svg>
       </button>
 
+      {/* Split tool */}
+      <button
+        className={`tool-btn${state.mode === 'split' ? ' active' : ''}`}
+        onClick={() => set({ mode: 'split' })}
+        title="Split line — click on a line to split segment"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <line x1="12" y1="3" x2="12" y2="9" />
+          <line x1="12" y1="15" x2="12" y2="21" />
+          <line x1="8" y1="12" x2="16" y2="12" />
+          <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+        </svg>
+      </button>
+
       {/* Scene marker tool */}
       <button
         className={`tool-btn${state.mode === 'scene' ? ' active' : ''}`}
@@ -59,31 +77,49 @@ export default function LineToolbar({ state, onChange }: Props) {
         </svg>
       </button>
 
-      <div className="tool-divider" />
-
-      {/* Straight segment (initial) */}
+      {/* Text annotation tool */}
       <button
-        className={`tool-btn${state.initialSegType === 'straight' ? ' active' : ''}`}
-        onClick={() => set({ initialSegType: 'straight', mode: 'draw' })}
-        title="Start with straight segment (on-screen)"
+        className={`tool-btn${state.mode === 'text' ? ' active' : ''}`}
+        onClick={() => set({ mode: 'text' })}
+        title="Add text annotation (T)"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-          <line x1="12" y1="3" x2="12" y2="21" />
-        </svg>
-      </button>
-
-      {/* Zigzag segment (initial) */}
-      <button
-        className={`tool-btn${state.initialSegType === 'zigzag' ? ' active' : ''}`}
-        onClick={() => set({ initialSegType: 'zigzag', mode: 'draw' })}
-        title="Start with zigzag segment (off-screen / VO)"
-      >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-          <polyline points="12,3 16,7 8,11 16,15 8,19 12,21" />
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <polyline points="4 6 4 4 20 4 20 6" />
+          <line x1="12" y1="4" x2="12" y2="20" />
+          <line x1="8" y1="20" x2="16" y2="20" />
         </svg>
       </button>
 
       <div className="tool-divider" />
+
+      {/* Straight/Zigzag buttons — only visible in draw mode */}
+      {state.mode === 'draw' && (
+        <>
+          {/* Straight segment (initial) */}
+          <button
+            className={`tool-btn${state.initialSegType === 'straight' ? ' active' : ''}`}
+            onClick={() => set({ initialSegType: 'straight', mode: 'draw' })}
+            title="Start with straight segment (on-screen)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <line x1="12" y1="3" x2="12" y2="21" />
+            </svg>
+          </button>
+
+          {/* Zigzag segment (initial) */}
+          <button
+            className={`tool-btn${state.initialSegType === 'zigzag' ? ' active' : ''}`}
+            onClick={() => set({ initialSegType: 'zigzag', mode: 'draw' })}
+            title="Start with zigzag segment (off-screen / VO)"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+              <polyline points="12,3 16,7 8,11 16,15 8,19 12,21" />
+            </svg>
+          </button>
+
+          <div className="tool-divider" />
+        </>
+      )}
 
       {/* Preset colors */}
       {PRESET_COLORS.map((c) => (
@@ -134,6 +170,33 @@ export default function LineToolbar({ state, onChange }: Props) {
           Tab
         </div>
       )}
+
+      {/* Undo / Redo */}
+      <div className="tool-divider" style={{ marginTop: 'auto' }} />
+      <button
+        className="tool-btn"
+        onClick={onUndo}
+        disabled={!canUndo}
+        title="Undo (Cmd+Z)"
+        style={{ opacity: canUndo ? 1 : 0.35 }}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <polyline points="9 14 4 9 9 4" />
+          <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
+        </svg>
+      </button>
+      <button
+        className="tool-btn"
+        onClick={onRedo}
+        disabled={!canRedo}
+        title="Redo (Cmd+Shift+Z)"
+        style={{ opacity: canRedo ? 1 : 0.35 }}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+          <polyline points="15 14 20 9 15 4" />
+          <path d="M4 20v-7a4 4 0 0 1 4-4h12" />
+        </svg>
+      </button>
     </div>
   )
 }

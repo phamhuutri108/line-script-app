@@ -1,8 +1,9 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
-import { Canvas, Line, Path, Group } from 'fabric'
+import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
+import { Canvas, Line, Path, Group, Circle, IText, Rect } from 'fabric'
 import { useAuthStore } from '../../stores/authStore'
 import { api } from '../../api/client'
 import { scenesApi, type SceneMarker } from '../../api/scenes'
+import { annotationsApi, type AnnotationRecord } from '../../api/annotations'
 import type { Shot } from '../../api/shots'
 import type { LineToolState } from './LineToolbar'
 
@@ -53,6 +54,7 @@ interface ContextMenuState {
   y: number
   lineId: string | null
   markerId: string | null
+  annotationId: string | null
   lineYNorm?: number  // y-position (normalized) of right-click on a line
 }
 
@@ -66,6 +68,25 @@ interface ShotLabel {
   shotSize: string
 }
 
+// ── Undo/Redo ────────────────────────────────────────────────────────────────
+
+type UndoEntry =
+  | { op: 'add_line';      line: LineRecord }
+  | { op: 'del_line';      line: LineRecord }
+  | { op: 'move_line';     id: string; oldX: number; newX: number }
+  | { op: 'add_marker';    marker: SceneMarker }
+  | { op: 'del_marker';    marker: SceneMarker }
+  | { op: 'split_line';    id: string; oldSegs: string; newSegs: string }
+  | { op: 'add_annotation'; annotation: AnnotationRecord }
+  | { op: 'del_annotation'; annotation: AnnotationRecord }
+
+// ── Handle exposed to parent ──────────────────────────────────────────────────
+
+export interface ScriptCanvasHandle {
+  undo: () => void
+  redo: () => void
+}
+
 interface Props {
   width: number
   height: number
@@ -76,12 +97,14 @@ interface Props {
   onLineCreated?: (info: LineCreatedInfo) => void
   onLineDeleted?: (lineId: string) => void
   onSceneMarkersChanged?: () => void
+  onExtractSceneName?: (yNorm: number) => Promise<string>
+  onUndoStateChange?: (canUndo: boolean, canRedo: boolean) => void
   highlightLineId?: string | null
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const STROKE_WIDTH = 4.5
+const STROKE_WIDTH = 2
 const BRACKET_HALF = 12   // px, half-width of bracket marks
 const ZIGZAG_AMP   = 7    // px, horizontal amplitude of zigzag
 const ZIGZAG_STEP  = 12   // px, pixels per half-wave
@@ -142,21 +165,240 @@ function computeLabels(
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ScriptCanvas({
+export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   width, height, scriptId, pageNumber, toolState, shots,
-  onLineCreated, onLineDeleted, onSceneMarkersChanged, highlightLineId,
-}: Props) {
-  const canvasRef      = useRef<HTMLCanvasElement>(null)
-  const fabricRef      = useRef<Canvas | null>(null)
-  const drawStateRef   = useRef<DrawState>({ phase: 'idle' })
-  const previewObjsRef = useRef<(Line | Path)[]>([])
+  onLineCreated, onLineDeleted, onSceneMarkersChanged, onExtractSceneName, onUndoStateChange, highlightLineId,
+}, ref) {
+  const canvasRef         = useRef<HTMLCanvasElement>(null)
+  const fabricRef         = useRef<Canvas | null>(null)
+  const drawStateRef      = useRef<DrawState>({ phase: 'idle' })
+  const previewObjsRef    = useRef<(Line | Path)[]>([])
+  const handleCirclesRef  = useRef<Circle[]>([])
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const undoStackRef      = useRef<UndoEntry[]>([])
+  const redoStackRef      = useRef<UndoEntry[]>([])
+  const dragStartXRef     = useRef<number>(0)
   const { token } = useAuthStore()
 
   const [lines, setLines] = useState<LineRecord[]>([])
   const [markers, setMarkers] = useState<SceneMarker[]>([])
+  const [annotations, setAnnotations] = useState<AnnotationRecord[]>([])
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   const labels = computeLabels(lines, markers, shots, width, height)
+
+  // ── Undo/Redo helpers ─────────────────────────────────────────────────────
+
+  function pushUndo(entry: UndoEntry) {
+    undoStackRef.current.push(entry)
+    redoStackRef.current = []
+    onUndoStateChange?.(true, false)
+  }
+
+  function syncUndoRedoState() {
+    const u = undoStackRef.current.length > 0
+    const r = redoStackRef.current.length > 0
+    onUndoStateChange?.(u, r)
+  }
+
+  function applyUndoEntry(entry: UndoEntry, canvas: Canvas) {
+    if (entry.op === 'add_line') {
+      // Undo add → delete the line
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.line.id)
+      if (obj) { canvas.remove(obj); canvas.requestRenderAll() }
+      if (token) {
+        api.delete(`/lines/${entry.line.id}`, token).catch(() => {})
+        api.delete(`/shots?lineId=${entry.line.id}`, token).catch(() => {})
+      }
+      setLines((prev) => prev.filter((l) => l.id !== entry.line.id))
+      onLineDeleted?.(entry.line.id)
+    } else if (entry.op === 'del_line') {
+      // Undo delete → restore line
+      if (token) {
+        api.post<{ line: LineRecord }>('/lines', {
+          scriptId, pageNumber,
+          lineType: 'solid',
+          xPosition: entry.line.x_position, yStart: entry.line.y_start, yEnd: entry.line.y_end,
+          color: entry.line.color, segmentsJson: entry.line.segments_json,
+          continuesNextPage: entry.line.continues_to_next_page === 1,
+          continuesPrevPage: entry.line.continues_from_prev_page === 1,
+        }, token).then((res) => {
+          addLineGroupToCanvas(canvas, res.line, width, height)
+          canvas.requestRenderAll()
+          setLines((prev) => [...prev, res.line])
+        }).catch(() => {})
+      }
+    } else if (entry.op === 'move_line') {
+      // Undo move → restore old X
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.id)
+      if (obj) { obj.set({ left: entry.oldX * width }); obj.setCoords(); canvas.requestRenderAll() }
+      if (token) api.patch(`/lines/${entry.id}`, { xPosition: entry.oldX }, token).catch(() => {})
+      setLines((prev) => prev.map((l) => l.id === entry.id ? { ...l, x_position: entry.oldX } : l))
+    } else if (entry.op === 'add_marker') {
+      // Undo add marker → delete it
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.marker.id)
+      if (obj) { canvas.remove(obj); canvas.requestRenderAll() }
+      if (token) scenesApi.delete(token, entry.marker.id).catch(() => {})
+      setMarkers((prev) => prev.filter((m) => m.id !== entry.marker.id))
+      onSceneMarkersChanged?.()
+    } else if (entry.op === 'del_marker') {
+      // Undo delete marker → restore it
+      if (token) {
+        scenesApi.create(token, {
+          scriptId, pageNumber: entry.marker.page_number,
+          yPosition: entry.marker.y_position, xOffset: entry.marker.x_offset,
+          name: entry.marker.name ?? undefined,
+        }).then((res) => {
+          const sortedIdx = [...markers, res.marker].sort((a, b) => a.y_position - b.y_position).findIndex((m) => m.id === res.marker.id)
+          addSceneMarkerToCanvas(canvas, res.marker, width, height, sortedIdx)
+          canvas.requestRenderAll()
+          setMarkers((prev) => [...prev, res.marker])
+          onSceneMarkersChanged?.()
+        }).catch(() => {})
+      }
+    } else if (entry.op === 'split_line') {
+      // Undo split → restore old segments
+      const line = lines.find((l) => l.id === entry.id)
+      if (!line) return
+      const restored = { ...line, segments_json: entry.oldSegs }
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.id)
+      if (obj) { canvas.remove(obj) }
+      addLineGroupToCanvas(canvas, restored, width, height)
+      canvas.requestRenderAll()
+      setLines((prev) => prev.map((l) => l.id === entry.id ? restored : l))
+      if (token) api.patch(`/lines/${entry.id}`, { segmentsJson: entry.oldSegs }, token).catch(() => {})
+    } else if (entry.op === 'add_annotation') {
+      // Undo add annotation → delete it
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.annotation.id)
+      if (obj) { canvas.remove(obj); canvas.requestRenderAll() }
+      if (token) annotationsApi.delete(token, entry.annotation.id).catch(() => {})
+      setAnnotations((prev) => prev.filter((a) => a.id !== entry.annotation.id))
+    } else if (entry.op === 'del_annotation') {
+      // Undo delete annotation → restore it
+      if (token) {
+        annotationsApi.create(token, {
+          scriptId, pageNumber, type: 'drawing', fabricJson: entry.annotation.fabric_json,
+        }).then((res) => {
+          const parsed = JSON.parse(res.annotation.fabric_json)
+          const obj = new IText(parsed.text ?? '', {
+            left: parsed.left, top: parsed.top,
+            fill: parsed.fill, fontSize: parsed.fontSize ?? 14,
+            selectable: true, evented: true,
+          })
+          ;(obj as unknown as { data: object }).data = { id: res.annotation.id, type: 'annotation' }
+          canvas.add(obj)
+          canvas.requestRenderAll()
+          setAnnotations((prev) => [...prev, res.annotation])
+        }).catch(() => {})
+      }
+    }
+  }
+
+  function applyRedoEntry(entry: UndoEntry, canvas: Canvas) {
+    if (entry.op === 'add_line') {
+      // Redo add → restore the line (we have the id, but re-create via API)
+      addLineGroupToCanvas(canvas, entry.line, width, height)
+      canvas.requestRenderAll()
+      setLines((prev) => [...prev, entry.line])
+      if (token) {
+        api.post<{ line: LineRecord }>('/lines', {
+          scriptId, pageNumber,
+          lineType: 'solid',
+          xPosition: entry.line.x_position, yStart: entry.line.y_start, yEnd: entry.line.y_end,
+          color: entry.line.color, segmentsJson: entry.line.segments_json,
+          continuesNextPage: entry.line.continues_to_next_page === 1,
+        }, token).catch(() => {})
+      }
+    } else if (entry.op === 'del_line') {
+      // Redo delete → delete again
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.line.id)
+      if (obj) { canvas.remove(obj); canvas.requestRenderAll() }
+      if (token) {
+        api.delete(`/lines/${entry.line.id}`, token).catch(() => {})
+        api.delete(`/shots?lineId=${entry.line.id}`, token).catch(() => {})
+      }
+      setLines((prev) => prev.filter((l) => l.id !== entry.line.id))
+      onLineDeleted?.(entry.line.id)
+    } else if (entry.op === 'move_line') {
+      // Redo move → apply new X
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.id)
+      if (obj) { obj.set({ left: entry.newX * width }); obj.setCoords(); canvas.requestRenderAll() }
+      if (token) api.patch(`/lines/${entry.id}`, { xPosition: entry.newX }, token).catch(() => {})
+      setLines((prev) => prev.map((l) => l.id === entry.id ? { ...l, x_position: entry.newX } : l))
+    } else if (entry.op === 'add_marker') {
+      if (token) {
+        scenesApi.create(token, {
+          scriptId, pageNumber: entry.marker.page_number,
+          yPosition: entry.marker.y_position, xOffset: entry.marker.x_offset,
+          name: entry.marker.name ?? undefined,
+        }).then((res) => {
+          const sortedIdx = [...markers, res.marker].sort((a, b) => a.y_position - b.y_position).findIndex((m) => m.id === res.marker.id)
+          addSceneMarkerToCanvas(canvas, res.marker, width, height, sortedIdx)
+          canvas.requestRenderAll()
+          setMarkers((prev) => [...prev, res.marker])
+          onSceneMarkersChanged?.()
+        }).catch(() => {})
+      }
+    } else if (entry.op === 'del_marker') {
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.marker.id)
+      if (obj) { canvas.remove(obj); canvas.requestRenderAll() }
+      if (token) scenesApi.delete(token, entry.marker.id).catch(() => {})
+      setMarkers((prev) => prev.filter((m) => m.id !== entry.marker.id))
+      onSceneMarkersChanged?.()
+    } else if (entry.op === 'split_line') {
+      // Redo split → apply new segments
+      const line = lines.find((l) => l.id === entry.id)
+      if (!line) return
+      const updated = { ...line, segments_json: entry.newSegs }
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.id)
+      if (obj) canvas.remove(obj)
+      addLineGroupToCanvas(canvas, updated, width, height)
+      canvas.requestRenderAll()
+      setLines((prev) => prev.map((l) => l.id === entry.id ? updated : l))
+      if (token) api.patch(`/lines/${entry.id}`, { segmentsJson: entry.newSegs }, token).catch(() => {})
+    } else if (entry.op === 'add_annotation') {
+      if (token) {
+        annotationsApi.create(token, {
+          scriptId, pageNumber, type: 'drawing', fabricJson: entry.annotation.fabric_json,
+        }).then((res) => {
+          const parsed = JSON.parse(res.annotation.fabric_json)
+          const obj = new IText(parsed.text ?? '', {
+            left: parsed.left, top: parsed.top,
+            fill: parsed.fill, fontSize: parsed.fontSize ?? 14,
+            selectable: true, evented: true,
+          })
+          ;(obj as unknown as { data: object }).data = { id: res.annotation.id, type: 'annotation' }
+          canvas.add(obj)
+          canvas.requestRenderAll()
+          setAnnotations((prev) => [...prev, res.annotation])
+        }).catch(() => {})
+      }
+    } else if (entry.op === 'del_annotation') {
+      const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === entry.annotation.id)
+      if (obj) { canvas.remove(obj); canvas.requestRenderAll() }
+      if (token) annotationsApi.delete(token, entry.annotation.id).catch(() => {})
+      setAnnotations((prev) => prev.filter((a) => a.id !== entry.annotation.id))
+    }
+  }
+
+  function undo() {
+    const entry = undoStackRef.current.pop()
+    if (!entry || !fabricRef.current) return
+    redoStackRef.current.push(entry)
+    applyUndoEntry(entry, fabricRef.current)
+    syncUndoRedoState()
+  }
+
+  function redo() {
+    const entry = redoStackRef.current.pop()
+    if (!entry || !fabricRef.current) return
+    undoStackRef.current.push(entry)
+    applyRedoEntry(entry, fabricRef.current)
+    syncUndoRedoState()
+  }
+
+  useImperativeHandle(ref, () => ({ undo, redo }))
+
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -222,16 +464,35 @@ export default function ScriptCanvas({
 
   const loadAll = useCallback(async (canvas: Canvas) => {
     try {
-      const [lineData, markerData] = await Promise.all([
+      const [lineData, markerData, annotationData] = await Promise.all([
         api.get<{ lines: LineRecord[] }>(`/lines?scriptId=${scriptId}&page=${pageNumber}`, token ?? undefined),
         token ? scenesApi.list(token, scriptId, pageNumber) : Promise.resolve({ markers: [] as SceneMarker[] }),
+        token ? annotationsApi.list(token, scriptId, pageNumber) : Promise.resolve({ annotations: [] as AnnotationRecord[] }),
       ])
       canvas.getObjects().forEach((o) => canvas.remove(o))
       lineData.lines.forEach((l) => addLineGroupToCanvas(canvas, l, width, height))
-      markerData.markers.forEach((m) => addSceneMarkerToCanvas(canvas, m, width, height))
+      const sortedMarkers = [...markerData.markers].sort((a, b) => a.y_position - b.y_position)
+      sortedMarkers.forEach((m, idx) => addSceneMarkerToCanvas(canvas, m, width, height, idx))
+      annotationData.annotations.forEach((a) => {
+        try {
+          const parsed = JSON.parse(a.fabric_json)
+          const obj = new IText(parsed.text ?? '', {
+            left: parsed.left ?? 50, top: parsed.top ?? 50,
+            fill: parsed.fill ?? '#000000', fontSize: parsed.fontSize ?? 14,
+            selectable: true, evented: true,
+          })
+          ;(obj as unknown as { data: object }).data = { id: a.id, type: 'annotation' }
+          canvas.add(obj)
+        } catch { /* ignore malformed annotation */ }
+      })
       canvas.requestRenderAll()
       setLines(lineData.lines)
-      setMarkers(markerData.markers)
+      setMarkers(sortedMarkers)
+      setAnnotations(annotationData.annotations)
+      // Clear undo/redo on page load
+      undoStackRef.current = []
+      redoStackRef.current = []
+      onUndoStateChange?.(false, false)
     } catch { /* silently ignore */ }
   }, [scriptId, pageNumber, token, width, height])
 
@@ -255,8 +516,15 @@ export default function ScriptCanvas({
     const isSelect = toolState.mode === 'select'
     canvas.selection = isSelect
     canvas.getObjects().forEach((obj) => {
-      obj.selectable = isSelect && !!(obj as unknown as { data?: { type?: string } }).data?.type
-      obj.evented = isSelect && !!(obj as unknown as { data?: { type?: string } }).data?.type
+      const data = (obj as unknown as { data?: { type?: string } }).data
+      // Annotations are always selectable/evented regardless of mode
+      if (data?.type === 'annotation') {
+        obj.selectable = true
+        obj.evented = true
+      } else {
+        obj.selectable = isSelect && !!data?.type
+        obj.evented = isSelect && !!data?.type
+      }
     })
     canvas.requestRenderAll()
   }, [toolState.mode])
@@ -294,9 +562,11 @@ export default function ScriptCanvas({
       const data = (hit as unknown as { data?: { id?: string; type?: string } }).data
       if (!data?.id) { setContextMenu(null); return }
       if (data.type === 'scene') {
-        setContextMenu({ x: e.clientX, y: e.clientY, lineId: null, markerId: data.id })
+        setContextMenu({ x: e.clientX, y: e.clientY, lineId: null, markerId: data.id, annotationId: null })
+      } else if (data.type === 'annotation') {
+        setContextMenu({ x: e.clientX, y: e.clientY, lineId: null, markerId: null, annotationId: data.id })
       } else {
-        setContextMenu({ x: e.clientX, y: e.clientY, lineId: data.id, markerId: null, lineYNorm: canvasY / height })
+        setContextMenu({ x: e.clientX, y: e.clientY, lineId: data.id, markerId: null, annotationId: null, lineYNorm: canvasY / height })
       }
     }
     upperEl.addEventListener('contextmenu', onContextMenu)
@@ -312,20 +582,82 @@ export default function ScriptCanvas({
     function onPointerDown(e: PointerEvent) {
       const canvas = fabricRef.current
       if (!canvas) return
+
+      // Select mode: long-press detection for iPad context menu; don't preventDefault so Fabric drag works
+      if (toolState.mode === 'select') {
+        longPressTimerRef.current = setTimeout(() => {
+          const hit = canvas.findTarget(e as unknown as MouseEvent)
+          if (!hit) return
+          const data = (hit as unknown as { data?: { id?: string; type?: string } }).data
+          if (!data?.id) return
+          const { y: canvasY } = getCanvasPoint(e)
+          if (data.type === 'scene') {
+            setContextMenu({ x: e.clientX, y: e.clientY, lineId: null, markerId: data.id, annotationId: null })
+          } else if (data.type === 'annotation') {
+            setContextMenu({ x: e.clientX, y: e.clientY, lineId: null, markerId: null, annotationId: data.id })
+          } else {
+            setContextMenu({ x: e.clientX, y: e.clientY, lineId: data.id, markerId: null, annotationId: null, lineYNorm: canvasY / height })
+          }
+        }, 500)
+        return // let Fabric handle selection and drag
+      }
+
       e.preventDefault()
 
       // Scene marker tool
       if (toolState.mode === 'scene') {
         const { y } = getCanvasPoint(e)
         if (token) {
-          scenesApi.create(token, { scriptId, pageNumber, yPosition: y / height, xOffset: 0 })
-            .then((res) => {
-              addSceneMarkerToCanvas(canvas, res.marker, width, height)
-              canvas.requestRenderAll()
-              setMarkers((prev) => [...prev, res.marker])
-              onSceneMarkersChanged?.()
-            }).catch(() => {})
+          const yNorm = y / height
+          const namePromise = onExtractSceneName ? onExtractSceneName(yNorm) : Promise.resolve('')
+          namePromise.then((name) => {
+            return scenesApi.create(token, { scriptId, pageNumber, yPosition: yNorm, xOffset: 0, name: name || undefined })
+          }).then((res) => {
+            const sortedIdx = [...markers, res.marker].sort((a, b) => a.y_position - b.y_position).findIndex((m) => m.id === res.marker.id)
+            addSceneMarkerToCanvas(canvas, res.marker, width, height, sortedIdx)
+            canvas.requestRenderAll()
+            setMarkers((prev) => [...prev, res.marker])
+            onSceneMarkersChanged?.()
+            pushUndo({ op: 'add_marker', marker: res.marker })
+          }).catch(() => {})
         }
+        return
+      }
+
+      // Split mode: click on a line to split it at that point
+      if (toolState.mode === 'split') {
+        const { y } = getCanvasPoint(e)
+        const hit = canvas.findTarget(e as unknown as MouseEvent)
+        if (hit) {
+          const data = (hit as unknown as { data?: { id?: string; type?: string } }).data
+          if (data?.type === 'line' && data.id) splitLineAt(data.id, y / height)
+        }
+        return
+      }
+
+      // Text annotation mode
+      if (toolState.mode === 'text') {
+        const { x, y } = getCanvasPoint(e)
+        const textObj = new IText('', {
+          left: x, top: y,
+          fill: toolState.color, fontSize: 14,
+          selectable: true, evented: true, padding: 4,
+        })
+        ;(textObj as unknown as { data: object }).data = { id: '__pending__', type: 'annotation' }
+        canvas.add(textObj)
+        canvas.setActiveObject(textObj)
+        textObj.enterEditing()
+        textObj.on('editing:exited', () => {
+          const text = textObj.text?.trim() ?? ''
+          if (!text || !token) { canvas.remove(textObj); canvas.requestRenderAll(); return }
+          const fabricJson = JSON.stringify({ text, left: textObj.left, top: textObj.top, fill: textObj.fill, fontSize: textObj.fontSize })
+          annotationsApi.create(token, { scriptId, pageNumber, type: 'drawing', fabricJson })
+            .then((res) => {
+              ;(textObj as unknown as { data: object }).data = { id: res.annotation.id, type: 'annotation' }
+              setAnnotations((prev) => [...prev, res.annotation])
+              pushUndo({ op: 'add_annotation', annotation: res.annotation })
+            }).catch(() => { canvas.remove(textObj); canvas.requestRenderAll() })
+        })
         return
       }
 
@@ -385,12 +717,18 @@ export default function ScriptCanvas({
           addLineGroupToCanvas(canvas, res.line, width, height)
           canvas.requestRenderAll()
           setLines((prev) => [...prev, res.line])
+          pushUndo({ op: 'add_line', line: res.line })
           onLineCreated?.({ lineId: res.line.id, xPosition: xNorm, yStart: yStartNorm, yEnd: yEndNorm, segments: finalSegments })
         }).catch(() => {})
       }
     }
 
     function onPointerMove(e: PointerEvent) {
+      // Cancel long-press if pointer moves
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }
       const canvas = fabricRef.current
       const state = drawStateRef.current
       if (!canvas || state.phase !== 'preview') return
@@ -399,11 +737,20 @@ export default function ScriptCanvas({
       renderPreview(canvas, drawStateRef.current as Extract<DrawState, { phase: 'preview' }>, toolState.color)
     }
 
+    function onPointerUp() {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current)
+        longPressTimerRef.current = null
+      }
+    }
+
     upperEl.addEventListener('pointerdown', onPointerDown)
     upperEl.addEventListener('pointermove', onPointerMove)
+    upperEl.addEventListener('pointerup', onPointerUp)
     return () => {
       upperEl.removeEventListener('pointerdown', onPointerDown)
       upperEl.removeEventListener('pointermove', onPointerMove)
+      upperEl.removeEventListener('pointerup', onPointerUp)
     }
   }, [toolState, scriptId, pageNumber, token, width, height])
 
@@ -413,6 +760,20 @@ export default function ScriptCanvas({
     function handleKey(e: KeyboardEvent) {
       const canvas = fabricRef.current
       const state = drawStateRef.current
+
+      // Undo: Cmd+Z (Mac) or Ctrl+Z (Win)
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        undo()
+        return
+      }
+
+      // Redo: Cmd+Shift+Z or Ctrl+Shift+Z
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'z') {
+        e.preventDefault()
+        redo()
+        return
+      }
 
       // Tab: add segment break mid-draw
       if (e.key === 'Tab' && state.phase === 'preview') {
@@ -466,6 +827,7 @@ export default function ScriptCanvas({
       if (obj.data.type === 'line') {
         // Horizontal drag — update x_position
         const newXNorm = (obj.getCenterPoint?.()?.x ?? 0) / width
+        pushUndo({ op: 'move_line', id: obj.data.id, oldX: dragStartXRef.current, newX: newXNorm })
         if (token) {
           api.patch(`/lines/${obj.data.id}`, { xPosition: newXNorm }, token).catch(() => {})
         }
@@ -487,10 +849,88 @@ export default function ScriptCanvas({
     return () => { canvas.off('object:modified', onModified) }
   })
 
+  // ── Selection handles ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+
+    function clearHandles() {
+      handleCirclesRef.current.forEach((o) => canvas!.remove(o))
+      handleCirclesRef.current = []
+    }
+
+    function makeHandle(cx: number, cy: number, color: string) {
+      return new Circle({
+        left: cx, top: cy,
+        originX: 'center', originY: 'center',
+        radius: 5,
+        stroke: color, strokeWidth: 1.5, strokeDashArray: [3, 2],
+        fill: 'rgba(255,255,255,0.8)',
+        selectable: false, evented: false,
+      })
+    }
+
+    function showHandles(obj: unknown) {
+      const o = obj as {
+        data?: { type?: string; color?: string; yStartPx?: number; yEndPx?: number }
+        getCenterPoint: () => { x: number }
+      }
+      if (o?.data?.type !== 'line') return
+      clearHandles()
+      const cx = o.getCenterPoint().x
+      const color = o.data?.color ?? '#e05c5c'
+      const y1 = o.data?.yStartPx ?? 0
+      const y2 = o.data?.yEndPx ?? height
+      const h1 = makeHandle(cx, y1, color)
+      const h2 = makeHandle(cx, y2, color)
+      canvas!.add(h1, h2)
+      handleCirclesRef.current = [h1, h2]
+      canvas!.requestRenderAll()
+    }
+
+    function onSelCreated(e: { selected?: unknown[] }) {
+      if (e.selected?.[0]) {
+        showHandles(e.selected[0])
+        const o = e.selected[0] as { data?: { type?: string }; getCenterPoint?: () => { x: number } }
+        if (o?.data?.type === 'line') dragStartXRef.current = (o.getCenterPoint?.()?.x ?? 0) / width
+      }
+    }
+    function onSelUpdated(e: { selected?: unknown[] }) { if (e.selected?.[0]) showHandles(e.selected[0]) }
+    function onSelCleared() { clearHandles(); canvas!.requestRenderAll() }
+    function onObjMoving(e: { target?: unknown }) {
+      const obj = e.target as {
+        data?: { type?: string; color?: string; yStartPx?: number; yEndPx?: number }
+        getCenterPoint: () => { x: number }
+      }
+      if (obj?.data?.type !== 'line') return
+      const cx = obj.getCenterPoint().x
+      // Update existing handle x positions instead of recreating
+      if (handleCirclesRef.current.length === 2) {
+        handleCirclesRef.current[0].set({ left: cx })
+        handleCirclesRef.current[1].set({ left: cx })
+        canvas!.requestRenderAll()
+      }
+    }
+
+    canvas.on('selection:created', onSelCreated as (e: object) => void)
+    canvas.on('selection:updated', onSelUpdated as (e: object) => void)
+    canvas.on('selection:cleared', onSelCleared)
+    canvas.on('object:moving', onObjMoving as (e: object) => void)
+    return () => {
+      canvas.off('selection:created', onSelCreated as (e: object) => void)
+      canvas.off('selection:updated', onSelUpdated as (e: object) => void)
+      canvas.off('selection:cleared', onSelCleared)
+      canvas.off('object:moving', onObjMoving as (e: object) => void)
+    }
+  })
+
   // ── Delete helpers ────────────────────────────────────────────────────────
 
   function deleteLineById(id: string) {
     const canvas = fabricRef.current
+    const lineRecord = lines.find((l) => l.id === id)
+    if (lineRecord) pushUndo({ op: 'del_line', line: lineRecord })
     const obj = canvas?.getObjects().find((o) => (o as unknown as { data?: { id?: string } }).data?.id === id)
     if (obj) { canvas?.remove(obj); canvas?.requestRenderAll() }
     if (token) {
@@ -503,11 +943,23 @@ export default function ScriptCanvas({
 
   function deleteMarkerById(id: string) {
     const canvas = fabricRef.current
+    const markerRecord = markers.find((m) => m.id === id)
+    if (markerRecord) pushUndo({ op: 'del_marker', marker: markerRecord })
     const obj = canvas?.getObjects().find((o) => (o as unknown as { data?: { id?: string } }).data?.id === id)
     if (obj) { canvas?.remove(obj); canvas?.requestRenderAll() }
     if (token) scenesApi.delete(token, id).catch(() => {})
     setMarkers((prev) => prev.filter((m) => m.id !== id))
     onSceneMarkersChanged?.()
+  }
+
+  function deleteAnnotationById(id: string) {
+    const canvas = fabricRef.current
+    const annotationRecord = annotations.find((a) => a.id === id)
+    if (annotationRecord) pushUndo({ op: 'del_annotation', annotation: annotationRecord })
+    const obj = canvas?.getObjects().find((o) => (o as unknown as { data?: { id?: string } }).data?.id === id)
+    if (obj) { canvas?.remove(obj); canvas?.requestRenderAll() }
+    if (token) annotationsApi.delete(token, id).catch(() => {})
+    setAnnotations((prev) => prev.filter((a) => a.id !== id))
   }
 
   // ── Context menu actions ──────────────────────────────────────────────────
@@ -516,21 +968,20 @@ export default function ScriptCanvas({
     if (!contextMenu) return
     if (contextMenu.lineId) deleteLineById(contextMenu.lineId)
     else if (contextMenu.markerId) deleteMarkerById(contextMenu.markerId)
+    else if (contextMenu.annotationId) deleteAnnotationById(contextMenu.annotationId)
     setContextMenu(null)
   }
 
-  function handleAddSegmentBreak() {
-    if (!contextMenu?.lineId || contextMenu.lineYNorm === undefined) return
+  function splitLineAt(lineId: string, yNorm: number) {
     const canvas = fabricRef.current
-    const line = lines.find((l) => l.id === contextMenu.lineId)
-    if (!line) { setContextMenu(null); return }
+    const line = lines.find((l) => l.id === lineId)
+    if (!line) return
 
     const segs = parseSegments(line)
-    const yNorm = contextMenu.lineYNorm
 
     // Find which segment contains this y-position
     const idx = segs.findIndex((s) => s.y_start <= yNorm && yNorm <= s.y_end)
-    if (idx === -1) { setContextMenu(null); return }
+    if (idx === -1) return
 
     const seg = segs[idx]
     const newType: 'straight' | 'zigzag' = seg.type === 'straight' ? 'zigzag' : 'straight'
@@ -541,7 +992,9 @@ export default function ScriptCanvas({
       ...segs.slice(idx + 1),
     ]
 
-    const updatedLine = { ...line, segments_json: JSON.stringify(newSegs) }
+    const oldSegsStr = line.segments_json ?? JSON.stringify(segs)
+    const newSegsStr = JSON.stringify(newSegs)
+    const updatedLine = { ...line, segments_json: newSegsStr }
 
     if (canvas) {
       const obj = canvas.getObjects().find((o) => (o as unknown as { data?: { id?: string } }).data?.id === line.id)
@@ -550,7 +1003,13 @@ export default function ScriptCanvas({
       canvas.requestRenderAll()
     }
     setLines((prev) => prev.map((l) => l.id === line.id ? updatedLine : l))
-    if (token) api.patch(`/lines/${line.id}`, { segmentsJson: JSON.stringify(newSegs) }, token).catch(() => {})
+    if (token) api.patch(`/lines/${line.id}`, { segmentsJson: newSegsStr }, token).catch(() => {})
+    pushUndo({ op: 'split_line', id: line.id, oldSegs: oldSegsStr, newSegs: newSegsStr })
+  }
+
+  function handleAddSegmentBreak() {
+    if (!contextMenu?.lineId || contextMenu.lineYNorm === undefined) return
+    splitLineAt(contextMenu.lineId, contextMenu.lineYNorm)
     setContextMenu(null)
   }
 
@@ -570,13 +1029,24 @@ export default function ScriptCanvas({
     >
       <canvas ref={canvasRef} className="fabric-canvas-el" style={{ cursor, touchAction: 'none' }} />
 
+      {/* Scene marker dashed lines overlay */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+        {markers.map((m) => (
+          <div
+            key={m.id}
+            className="scene-marker-line"
+            style={{ top: m.y_position * height }}
+          />
+        ))}
+      </div>
+
       {/* Shot labels overlay */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
         {labels.map((label) => (
           <div
             key={label.lineId}
             className="shot-label"
-            style={{ left: label.x + BRACKET_HALF + 4, top: label.yTop, color: label.color, borderColor: label.color }}
+            style={{ left: label.x, top: label.yTop, transform: 'translateX(-50%)', color: label.color, borderColor: label.color }}
           >
             <span className="shot-label-num">
               {label.sceneNum > 0 ? `${label.sceneNum}/` : ''}{label.shotNum}
@@ -595,17 +1065,21 @@ export default function ScriptCanvas({
         >
           {contextMenu.lineId && (
             <button className="ctx-menu-item" onClick={handleAddSegmentBreak}>
-              Thêm break tại đây
+              Split tại đây
             </button>
           )}
           <button className="ctx-menu-item ctx-menu-danger" onClick={handleContextDelete}>
-            {contextMenu.lineId ? 'Xóa line + shot' : 'Xóa scene marker'}
+            {contextMenu.lineId
+              ? 'Xóa line + shot'
+              : contextMenu.annotationId
+              ? 'Xóa annotation'
+              : 'Xóa scene marker'}
           </button>
         </div>
       )}
     </div>
   )
-}
+})
 
 // ── Canvas rendering functions ────────────────────────────────────────────────
 
@@ -673,22 +1147,42 @@ function addLineGroupToCanvas(canvas: Canvas, record: LineRecord, w: number, h: 
     hasControls: false,
     hasBorders: false,
   })
-  ;(group as unknown as { data: object }).data = { id: record.id, type: 'line' }
+  ;(group as unknown as { data: object }).data = { id: record.id, type: 'line', color: record.color, yStartPx: y1Px, yEndPx: y2Px }
   canvas.add(group)
 }
 
-function addSceneMarkerToCanvas(canvas: Canvas, marker: SceneMarker, w: number, h: number) {
+function addSceneMarkerToCanvas(canvas: Canvas, marker: SceneMarker, w: number, h: number, markerIndex: number) {
   const x = marker.x_offset * w
   const y = marker.y_position * h
-  const arm   = new Line([0, 0, 100, 0], { stroke: '#6b7280', strokeWidth: 1.5, strokeDashArray: [6, 4], selectable: false, evented: false })
-  const tick  = new Line([0, -6, 0, 6], { stroke: '#6b7280', strokeWidth: 2, selectable: false, evented: false })
-  const tStem = new Line([0, 6, 0, 16], { stroke: '#6b7280', strokeWidth: 1.5, selectable: false, evented: false })
-  const tBar  = new Line([-7, 16, 7, 16], { stroke: '#6b7280', strokeWidth: 2, selectable: false, evented: false })
+
+  const sceneNum = markerIndex + 1
+  const labelText = marker.name
+    ? `${sceneNum}. ${marker.name}`
+    : `Cảnh ${sceneNum}`
+
+  // Background rect
+  const rect = new Rect({
+    width: Math.min(240, Math.max(80, labelText.length * 7.5 + 16)),
+    height: 22,
+    fill: 'rgba(30,30,40,0.85)',
+    stroke: '#6b7280',
+    strokeWidth: 1,
+    rx: 3, ry: 3,
+    selectable: false, evented: false,
+  })
+
+  const text = new IText(labelText, {
+    fontSize: 11,
+    fill: '#e5e7eb',
+    fontFamily: 'Arial, sans-serif',
+    left: 6, top: 3,
+    selectable: false, evented: false,
+  })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const group = new Group([arm, tick, tStem, tBar] as any[], {
-    left: x, top: y,
-    originX: 'left', originY: 'center',
+  const group = new Group([rect, text] as any[], {
+    left: x, top: y - 11,
+    originX: 'left', originY: 'top',
     selectable: true, evented: true,
     lockMovementY: true,
     hasControls: false, hasBorders: false,

@@ -259,7 +259,7 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {shot.scene_number ? `Scene ${shot.scene_number}` : 'Untitled'}
+            {shot.scene_number ? `Scene ${shot.scene_number}` : `Shot ${shot.shot_number}`}
             {shot.location ? ` — ${shot.location}` : ''}
           </div>
           <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>

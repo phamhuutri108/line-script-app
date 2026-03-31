@@ -119,6 +119,8 @@
   border-right: 1px solid var(--color-border);
   flex-shrink: 0;
   z-index: 5;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .tool-btn {
@@ -220,21 +222,23 @@ input[type="color"].hidden-color {
   align-items: center;
   font-family: Arial, sans-serif;
   font-weight: 700;
-  border: 1.5px solid;
+  border: 2px solid;
   border-radius: 3px;
-  padding: 1px 4px;
+  padding: 2px 6px;
   line-height: 1.3;
-  background: rgba(0, 0, 0, 0.6);
+  background: white;
   pointer-events: none;
   white-space: nowrap;
+  min-width: 28px;
+  text-align: center;
 }
 
 .shot-label-num {
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .shot-label-size {
-  font-size: 9px;
+  font-size: 11px;
   opacity: 0.85;
 }
 
@@ -358,6 +362,18 @@ input[type="color"].hidden-color {
 }
 
 /* ── Tab hint in toolbar ── */
+/* ── Scene marker dashed line (full-width DOM overlay) ── */
+.scene-marker-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1.5px dashed #6b7280;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.6;
+}
+
 .tool-tab-hint {
   font-size: 0.6rem;
   color: var(--color-text-muted);

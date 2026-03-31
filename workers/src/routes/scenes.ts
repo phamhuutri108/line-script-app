@@ -22,16 +22,16 @@ export async function handleScenes(request: Request, env: Env): Promise<Response
 
   // POST /scenes
   if (request.method === 'POST' && parts.length === 0) {
-    let body: { scriptId?: string; pageNumber?: number; yPosition?: number; xOffset?: number }
+    let body: { scriptId?: string; pageNumber?: number; yPosition?: number; xOffset?: number; name?: string }
     try { body = await request.json() } catch { return jsonResponse({ error: 'Invalid JSON' }, 400) }
-    const { scriptId, pageNumber, yPosition, xOffset } = body
+    const { scriptId, pageNumber, yPosition, xOffset, name } = body
     if (!scriptId || pageNumber === undefined || yPosition === undefined) {
       return jsonResponse({ error: 'scriptId, pageNumber, yPosition required' }, 400)
     }
     const id = generateId()
     await env.DB.prepare(
-      'INSERT INTO scene_markers (id, script_id, user_id, page_number, y_position, x_offset) VALUES (?, ?, ?, ?, ?, ?)'
-    ).bind(id, scriptId, user.sub, pageNumber, yPosition, xOffset ?? 0).run()
+      'INSERT INTO scene_markers (id, script_id, user_id, page_number, y_position, x_offset, name) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).bind(id, scriptId, user.sub, pageNumber, yPosition, xOffset ?? 0, name ?? null).run()
     const marker = await env.DB.prepare('SELECT * FROM scene_markers WHERE id = ?').bind(id).first()
     return jsonResponse({ marker }, 201)
   }
@@ -44,7 +44,7 @@ export async function handleScenes(request: Request, env: Env): Promise<Response
     if (!existing) return jsonResponse({ error: 'Not found' }, 404)
     if (existing.user_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)
 
-    let body: { yPosition?: number; xOffset?: number }
+    let body: { yPosition?: number; xOffset?: number; name?: string }
     try { body = await request.json() } catch { return jsonResponse({ error: 'Invalid JSON' }, 400) }
 
     if (body.yPosition !== undefined) {
@@ -54,6 +54,10 @@ export async function handleScenes(request: Request, env: Env): Promise<Response
     if (body.xOffset !== undefined) {
       await env.DB.prepare('UPDATE scene_markers SET x_offset = ? WHERE id = ?')
         .bind(body.xOffset, parts[0]).run()
+    }
+    if (body.name !== undefined) {
+      await env.DB.prepare('UPDATE scene_markers SET name = ? WHERE id = ?')
+        .bind(body.name, parts[0]).run()
     }
     const marker = await env.DB.prepare('SELECT * FROM scene_markers WHERE id = ?').bind(parts[0]).first()
     return jsonResponse({ marker })
