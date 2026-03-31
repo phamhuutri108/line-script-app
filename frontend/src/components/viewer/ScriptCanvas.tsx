@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
-import { Canvas, Line, Path, Group, Circle, IText, Rect } from 'fabric'
+import { Canvas, Line, Path, Group, Circle, IText } from 'fabric'
 import { useAuthStore } from '../../stores/authStore'
 import { api } from '../../api/client'
 import { scenesApi, type SceneMarker } from '../../api/scenes'
@@ -185,6 +185,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   const redoStackRef      = useRef<UndoEntry[]>([])
   const dragStartXRef     = useRef<number>(0)
   const draggingXRef      = useRef<Record<string, number>>({})
+  const draggingMarkerRef = useRef<Record<string, number>>({})
   const { token } = useAuthStore()
 
   const [lines, setLines] = useState<LineRecord[]>([])
@@ -192,7 +193,10 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   const [annotations, setAnnotations] = useState<AnnotationRecord[]>([])
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [draggingX, setDraggingX] = useState<Record<string, number>>({})
+  const [draggingMarker, setDraggingMarker] = useState<Record<string, number>>({})
   const [activeBadge, setActiveBadge] = useState<{ lineId: string; field: 'shot_type' | 'movement' } | null>(null)
+  const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null)
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
 
   const labels = computeLabels(lines, markers, shots, width, height)
 
@@ -258,8 +262,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
           yPosition: entry.marker.y_position, xOffset: entry.marker.x_offset,
           name: entry.marker.name ?? undefined,
         }).then((res) => {
-          const sortedIdx = [...markers, res.marker].sort((a, b) => a.y_position - b.y_position).findIndex((m) => m.id === res.marker.id)
-          addSceneMarkerToCanvas(canvas, res.marker, width, height, sortedIdx)
+          addSceneMarkerToCanvas(canvas, res.marker, width, height)
           canvas.requestRenderAll()
           setMarkers((prev) => [...prev, res.marker])
           onSceneMarkersChanged?.()
@@ -341,8 +344,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
           yPosition: entry.marker.y_position, xOffset: entry.marker.x_offset,
           name: entry.marker.name ?? undefined,
         }).then((res) => {
-          const sortedIdx = [...markers, res.marker].sort((a, b) => a.y_position - b.y_position).findIndex((m) => m.id === res.marker.id)
-          addSceneMarkerToCanvas(canvas, res.marker, width, height, sortedIdx)
+          addSceneMarkerToCanvas(canvas, res.marker, width, height)
           canvas.requestRenderAll()
           setMarkers((prev) => [...prev, res.marker])
           onSceneMarkersChanged?.()
@@ -481,7 +483,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
       canvas.getObjects().forEach((o) => canvas.remove(o))
       lineData.lines.forEach((l) => addLineGroupToCanvas(canvas, l, width, height))
       const sortedMarkers = [...markerData.markers].sort((a, b) => a.y_position - b.y_position)
-      sortedMarkers.forEach((m, idx) => addSceneMarkerToCanvas(canvas, m, width, height, idx))
+      sortedMarkers.forEach((m) => addSceneMarkerToCanvas(canvas, m, width, height))
       annotationData.annotations.forEach((a) => {
         try {
           const parsed = JSON.parse(a.fabric_json)
@@ -622,8 +624,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
           namePromise.then((name) => {
             return scenesApi.create(token, { scriptId, pageNumber, yPosition: yNorm, xOffset: 0, name: name || undefined })
           }).then((res) => {
-            const sortedIdx = [...markers, res.marker].sort((a, b) => a.y_position - b.y_position).findIndex((m) => m.id === res.marker.id)
-            addSceneMarkerToCanvas(canvas, res.marker, width, height, sortedIdx)
+            addSceneMarkerToCanvas(canvas, res.marker, width, height)
             canvas.requestRenderAll()
             setMarkers((prev) => [...prev, res.marker])
             onSceneMarkersChanged?.()
@@ -842,15 +843,15 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
         }
         setLines((prev) => prev.map((l) => l.id === obj.data!.id ? { ...l, x_position: newXNorm } : l))
       } else if (obj.data.type === 'scene') {
-        const xOff = (obj.left ?? 0) / width
         const yPos = (obj.top ?? 0) / height
         const id = obj.data.id
+        // Optimistic state update + clear dragging state
+        setMarkers((prev) => prev.map((m) => m.id === id ? { ...m, y_position: yPos } : m))
+        draggingMarkerRef.current = {}
+        setDraggingMarker({})
+        onSceneMarkersChanged?.()
         if (token) {
-          scenesApi.update(token, id, { yPosition: yPos, xOffset: xOff })
-            .then(() => {
-              setMarkers((prev) => prev.map((m) => m.id === id ? { ...m, y_position: yPos, x_offset: xOff } : m))
-              onSceneMarkersChanged?.()
-            }).catch(() => {})
+          scenesApi.update(token, id, { yPosition: yPos }).catch(() => {})
         }
       }
     }
@@ -901,33 +902,48 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     function onSelCreated(e: { selected?: unknown[] }) {
       if (e.selected?.[0]) {
         showHandles(e.selected[0])
-        const o = e.selected[0] as { data?: { type?: string }; getCenterPoint?: () => { x: number } }
+        const o = e.selected[0] as { data?: { type?: string; id?: string }; getCenterPoint?: () => { x: number } }
         if (o?.data?.type === 'line') dragStartXRef.current = (o.getCenterPoint?.()?.x ?? 0) / width
+        if (o?.data?.type === 'scene') setSelectedMarkerId(o.data.id ?? null)
       }
     }
-    function onSelUpdated(e: { selected?: unknown[] }) { if (e.selected?.[0]) showHandles(e.selected[0]) }
+    function onSelUpdated(e: { selected?: unknown[] }) {
+      if (e.selected?.[0]) {
+        showHandles(e.selected[0])
+        const o = e.selected[0] as { data?: { type?: string; id?: string } }
+        if (o?.data?.type === 'scene') setSelectedMarkerId(o.data.id ?? null)
+      }
+    }
     function onSelCleared() {
       clearHandles()
       draggingXRef.current = {}
       setDraggingX({})
+      draggingMarkerRef.current = {}
+      setDraggingMarker({})
+      setSelectedMarkerId(null)
       canvas!.requestRenderAll()
     }
     function onObjMoving(e: { target?: unknown }) {
       const obj = e.target as {
         data?: { id?: string; type?: string; color?: string; yStartPx?: number; yEndPx?: number }
         getCenterPoint: () => { x: number }
+        top?: number
       }
-      if (obj?.data?.type !== 'line') return
-      const cx = obj.getCenterPoint().x
-      // Update existing handle x positions instead of recreating
-      if (handleCirclesRef.current.length === 2) {
-        handleCirclesRef.current[0].set({ left: cx })
-        handleCirclesRef.current[1].set({ left: cx })
-      }
-      // Real-time label position update
-      if (obj.data?.id) {
-        draggingXRef.current[obj.data.id] = cx
-        setDraggingX({ ...draggingXRef.current })
+      if (obj?.data?.type === 'line') {
+        const cx = obj.getCenterPoint().x
+        if (handleCirclesRef.current.length === 2) {
+          handleCirclesRef.current[0].set({ left: cx })
+          handleCirclesRef.current[1].set({ left: cx })
+        }
+        if (obj.data?.id) {
+          draggingXRef.current[obj.data.id] = cx
+          setDraggingX({ ...draggingXRef.current })
+        }
+      } else if (obj?.data?.type === 'scene') {
+        if (obj.data?.id) {
+          draggingMarkerRef.current[obj.data.id] = obj.top ?? 0
+          setDraggingMarker({ ...draggingMarkerRef.current })
+        }
       }
       canvas!.requestRenderAll()
     }
@@ -1032,6 +1048,35 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     setContextMenu(null)
   }
 
+  // ── Scene marker rename ───────────────────────────────────────────────────
+
+  function handleMarkerRename(id: string, name: string) {
+    setEditingMarkerId(null)
+    const trimmed = name.trim()
+    if (!token) return
+    scenesApi.update(token, id, { name: trimmed || undefined })
+      .then((res) => {
+        setMarkers((prev) => prev.map((m) => m.id === id ? res.marker : m))
+        onSceneMarkersChanged?.()
+      }).catch(() => {})
+  }
+
+  // ── Double-click: inline marker edit ─────────────────────────────────────
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+    function onDblClick(e: { target?: unknown }) {
+      const obj = e.target as { data?: { type?: string; id?: string } } | null
+      if (obj?.data?.type === 'scene' && obj.data.id) {
+        setEditingMarkerId(obj.data.id)
+      }
+    }
+    canvas.on('mouse:dblclick', onDblClick as (e: object) => void)
+    return () => { canvas.off('mouse:dblclick', onDblClick as (e: object) => void) }
+  })
+
   // ── Badge update ──────────────────────────────────────────────────────────
 
   async function handleBadgeUpdate(lineId: string, field: 'shot_type' | 'movement', value: string) {
@@ -1056,19 +1101,37 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     <div
       className="script-canvas-wrapper"
       style={{ position: 'absolute', top: 0, left: 0, width, height }}
-      onClick={() => { contextMenu && setContextMenu(null); activeBadge && setActiveBadge(null) }}
+      onClick={() => { contextMenu && setContextMenu(null); activeBadge && setActiveBadge(null); editingMarkerId && setEditingMarkerId(null) }}
     >
       <canvas ref={canvasRef} className="fabric-canvas-el" style={{ cursor, touchAction: 'none' }} />
 
-      {/* Scene marker dashed lines overlay */}
+      {/* Scene markers overlay: dashed line + numbered circle badge */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-        {markers.map((m) => (
-          <div
-            key={m.id}
-            className="scene-marker-line"
-            style={{ top: m.y_position * height }}
-          />
-        ))}
+        {[...markers].sort((a, b) => a.y_position - b.y_position).map((m, idx) => {
+          const yPx = draggingMarker[m.id] ?? (m.y_position * height)
+          const isEditing = editingMarkerId === m.id
+          const isSelected = selectedMarkerId === m.id
+          return (
+            <div key={m.id} style={{ position: 'absolute', top: yPx, left: 0, right: 0 }}>
+              <div style={{ position: 'absolute', left: 0, right: 0, borderTop: '1.5px dashed #6b7280' }} />
+              <div className={`scene-marker-badge${isSelected ? ' selected' : ''}`}>{idx + 1}</div>
+              {isEditing && (
+                <input
+                  autoFocus
+                  className="scene-marker-name-input"
+                  defaultValue={m.name ?? ''}
+                  onClick={(e) => e.stopPropagation()}
+                  onBlur={(e) => handleMarkerRename(m.id, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur()
+                    if (e.key === 'Escape') setEditingMarkerId(null)
+                  }}
+                  style={{ pointerEvents: 'auto' }}
+                />
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/* Shot labels overlay */}
@@ -1239,41 +1302,26 @@ function addLineGroupToCanvas(canvas: Canvas, record: LineRecord, w: number, h: 
   canvas.add(group)
 }
 
-function addSceneMarkerToCanvas(canvas: Canvas, marker: SceneMarker, w: number, h: number, markerIndex: number) {
-  const x = marker.x_offset * w
+function addSceneMarkerToCanvas(canvas: Canvas, marker: SceneMarker, _w: number, h: number) {
   const y = marker.y_position * h
 
-  const sceneNum = markerIndex + 1
-  const labelText = marker.name
-    ? `${sceneNum}. ${marker.name}`
-    : `Cảnh ${sceneNum}`
-
-  // Background rect
-  const rect = new Rect({
-    width: Math.min(240, Math.max(80, labelText.length * 7.5 + 16)),
-    height: 22,
-    fill: 'rgba(30,30,40,0.85)',
-    stroke: '#6b7280',
-    strokeWidth: 1,
-    rx: 3, ry: 3,
-    selectable: false, evented: false,
-  })
-
-  const text = new IText(labelText, {
-    fontSize: 11,
-    fill: '#e5e7eb',
-    fontFamily: 'Arial, sans-serif',
-    left: 6, top: 3,
+  // Invisible hit-area circle — visual badge is in the HTML overlay
+  const hitArea = new Circle({
+    radius: 11,
+    fill: 'rgba(0,0,0,0)',
+    stroke: 'transparent',
+    strokeWidth: 0,
     selectable: false, evented: false,
   })
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const group = new Group([rect, text] as any[], {
-    left: x, top: y - 11,
-    originX: 'left', originY: 'top',
+  const group = new Group([hitArea] as any[], {
+    left: 15, top: y,
+    originX: 'center', originY: 'center',
     selectable: true, evented: true,
-    lockMovementY: true,
+    lockMovementX: true, lockMovementY: false,
     hasControls: false, hasBorders: false,
+    hoverCursor: 'ns-resize',
   })
   ;(group as unknown as { data: object }).data = { id: marker.id, type: 'scene' }
   canvas.add(group)
