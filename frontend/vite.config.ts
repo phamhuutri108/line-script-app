@@ -8,11 +8,11 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Line Script App',
-        short_name: 'LineScript',
-        description: 'Script lining and shotlist tool for filmmakers',
-        theme_color: '#1a1a2e',
-        background_color: '#1a1a2e',
+        name: 'Script Lining',
+        short_name: 'ScriptLining',
+        description: 'Line Script and auto Shotlist tool',
+        theme_color: '#004aad',
+        background_color: '#004aad',
         display: 'standalone',
         icons: [
           {
