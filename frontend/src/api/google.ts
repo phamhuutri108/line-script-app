@@ -20,6 +20,9 @@ export const googleApi = {
   getDriveFolders: (token: string) =>
     api.get<{ folders: DriveFolder[] }>('/google/drive/folders', token),
 
+  getAccessToken: (token: string) =>
+    api.get<{ accessToken: string }>('/google/access-token', token),
+
   sheetsSetup: (token: string, data: {
     scriptId: string
     folderId?: string

@@ -316,6 +316,16 @@
 .sl-modal-preview-label { color: var(--color-text-muted); white-space: nowrap; }
 .sl-modal-preview code { font-size: 0.78rem; color: var(--color-accent); word-break: break-all; }
 .sl-modal-error { font-size: 0.8rem; color: var(--color-danger); }
+.sl-folder-picker { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.25rem; }
+.sl-folder-picker-btn {
+  padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; cursor: pointer;
+  border: 1px solid var(--color-border); background: var(--color-surface);
+  color: var(--color-text); transition: background 0.15s;
+}
+.sl-folder-picker-btn:hover:not(:disabled) { background: var(--color-border); }
+.sl-folder-picker-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.sl-folder-selected { font-size: 0.85rem; color: var(--color-accent); font-weight: 500; }
+.sl-folder-none { font-size: 0.82rem; color: var(--color-text-muted); font-style: italic; }
 .sl-modal-footer {
   display: flex; justify-content: flex-end; gap: 0.5rem;
   padding: 0.75rem 1.25rem 1rem;

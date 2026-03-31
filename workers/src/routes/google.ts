@@ -61,6 +61,13 @@ export async function handleGoogle(request: Request, env: Env): Promise<Response
     const user = await verifyAuth(request, env)
     return getDriveFolders(user.sub, env)
   }
+  // GET /google/access-token
+  if (request.method === 'GET' && path === '/access-token') {
+    const user = await verifyAuth(request, env)
+    const token = await getValidToken(user.sub, env)
+    if (!token) return jsonResponse({ error: 'Google account not connected' }, 400)
+    return jsonResponse({ accessToken: token })
+  }
   // POST /google/sheets/setup
   if (request.method === 'POST' && path === '/sheets/setup') {
     const user = await verifyAuth(request, env)

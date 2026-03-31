@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { shotsApi, type Shot, type ShotUpdate } from '../../api/shots'
 import { scriptsApi, projectsApi, type Script } from '../../api/projects'
-import { googleApi, type DriveFolder } from '../../api/google'
+import { googleApi } from '../../api/google'
 import { ApiError } from '../../api/client'
 import * as XLSX from 'xlsx'
 import './shotlist.css'
@@ -428,21 +428,56 @@ function SheetSetupModal({
   onClose: () => void
   onCreated: (sheetsId: string, sheetsUrl: string) => void
 }) {
-  const [folders, setFolders] = useState<DriveFolder[]>([])
-  const [folderId, setFolderId] = useState('root')
+  const [folderId, setFolderId] = useState<string | null>(null)
+  const [folderName, setFolderName] = useState<string>('')
   const [abbrev, setAbbrev] = useState(() => genAbbrev(projectName))
   const [versionType, setVersionType] = useState<'draft' | 'final'>('draft')
   const [versionNum, setVersionNum] = useState('01')
   const [creating, setCreating] = useState(false)
-  const [loadingFolders, setLoadingFolders] = useState(true)
+  const [loadingPicker, setLoadingPicker] = useState(false)
   const [error, setError] = useState('')
 
-  useEffect(() => {
-    googleApi.getDriveFolders(token)
-      .then((res) => setFolders(res.folders))
-      .catch(() => setFolders([{ id: 'root', name: 'My Drive (root)' }]))
-      .finally(() => setLoadingFolders(false))
-  }, [token])
+  async function openPicker() {
+    setLoadingPicker(true)
+    try {
+      const { accessToken } = await googleApi.getAccessToken(token)
+      await new Promise<void>((resolve, reject) => {
+        if ((window as any).gapi?.picker) { resolve(); return }
+        const existing = document.getElementById('gapi-script')
+        if (existing) { setTimeout(resolve, 500); return }
+        const script = document.createElement('script')
+        script.id = 'gapi-script'
+        script.src = 'https://apis.google.com/js/api.js'
+        script.onload = () => {
+          (window as any).gapi.load('picker', { callback: resolve })
+        }
+        script.onerror = reject
+        document.head.appendChild(script)
+      })
+      const pickerApi = (window as any).google?.picker
+      if (!pickerApi) throw new Error('Picker không tải được')
+      const picker = new pickerApi.PickerBuilder()
+        .addView(new pickerApi.DocsView(pickerApi.ViewId.FOLDERS)
+          .setSelectFolderEnabled(true)
+          .setIncludeFolders(true)
+          .setMimeTypes('application/vnd.google-apps.folder'))
+        .setOAuthToken(accessToken)
+        .setDeveloperKey(import.meta.env.VITE_GOOGLE_PICKER_API_KEY)
+        .setCallback((data: any) => {
+          if (data.action === pickerApi.Action.PICKED) {
+            const doc = data.docs[0]
+            setFolderId(doc.id)
+            setFolderName(doc.name)
+          }
+        })
+        .build()
+      picker.setVisible(true)
+    } catch (e) {
+      setError('Không mở được Drive Picker')
+    } finally {
+      setLoadingPicker(false)
+    }
+  }
 
   const now = new Date()
   const dateStr = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
@@ -456,7 +491,7 @@ function SheetSetupModal({
     try {
       const res = await googleApi.sheetsSetup(token, {
         scriptId,
-        folderId: folderId === 'root' ? undefined : folderId,
+        folderId: folderId ?? undefined,
         abbrev: abbrev.trim(),
         projectName,
         versionType,
@@ -478,20 +513,25 @@ function SheetSetupModal({
         </div>
 
         <div className="sl-modal-body">
-          <label className="sl-modal-label">
-            Lưu vào folder
-            <select
-              className="sl-select sl-modal-select"
-              value={folderId}
-              onChange={(e) => setFolderId(e.target.value)}
-              disabled={loadingFolders}
-            >
-              {loadingFolders
-                ? <option>Đang tải…</option>
-                : folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)
-              }
-            </select>
-          </label>
+          <div className="sl-modal-label">
+            <span>Lưu vào folder</span>
+            <div className="sl-folder-picker">
+              <button
+                type="button"
+                className="sl-folder-picker-btn"
+                onClick={openPicker}
+                disabled={loadingPicker || creating}
+              >
+                {loadingPicker ? 'Đang mở…' : '📁 Chọn folder trên Drive'}
+              </button>
+              {folderName && (
+                <span className="sl-folder-selected">{folderName}</span>
+              )}
+              {!folderName && (
+                <span className="sl-folder-none">My Drive (root)</span>
+              )}
+            </div>
+          </div>
 
           <label className="sl-modal-label">
             Tên tắt dự án
