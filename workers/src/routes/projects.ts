@@ -18,6 +18,10 @@ export async function handleProjects(request: Request, env: Env): Promise<Respon
     requireOwnerOrAbove(user)
     return createProject(request, user, env)
   }
+  // GET /projects/trash
+  if (request.method === 'GET' && parts[0] === 'trash' && parts.length === 1) {
+    return listTrash(user, env)
+  }
   // GET /projects/:id
   if (request.method === 'GET' && parts.length === 1) {
     return getProject(parts[0], user, env)
@@ -28,7 +32,15 @@ export async function handleProjects(request: Request, env: Env): Promise<Respon
   }
   // DELETE /projects/:id
   if (request.method === 'DELETE' && parts.length === 1) {
-    return deleteProject(parts[0], user, env)
+    return softDeleteProject(parts[0], user, env)
+  }
+  // POST /projects/:id/restore
+  if (request.method === 'POST' && parts[1] === 'restore') {
+    return restoreProject(parts[0], user, env)
+  }
+  // DELETE /projects/:id/permanent
+  if (request.method === 'DELETE' && parts[1] === 'permanent') {
+    return permanentDeleteProject(parts[0], user, env)
   }
   // POST /projects/:id/members
   if (request.method === 'POST' && parts[1] === 'members') {
@@ -46,29 +58,62 @@ async function listProjects(user: Awaited<ReturnType<typeof verifyAuth>>, env: E
   let rows
 
   if (isSuperAdmin(user)) {
-    // Super admin sees all projects
     const result = await env.DB.prepare(`
       SELECT p.*, u.name AS owner_name,
         (SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) AS member_count,
         (SELECT COUNT(*) FROM scripts s WHERE s.project_id = p.id) AS script_count
       FROM projects p
       LEFT JOIN users u ON u.id = p.owner_id
+      WHERE p.deleted_at IS NULL
       ORDER BY p.created_at DESC
     `).all()
     rows = result.results
   } else {
-    // Owner/member sees their own projects
     const result = await env.DB.prepare(`
       SELECT p.*, u.name AS owner_name,
         (SELECT COUNT(*) FROM project_members pm WHERE pm.project_id = p.id) AS member_count,
         (SELECT COUNT(*) FROM scripts s WHERE s.project_id = p.id) AS script_count
       FROM projects p
       LEFT JOIN users u ON u.id = p.owner_id
-      WHERE p.owner_id = ? OR p.id IN (
+      WHERE p.deleted_at IS NULL AND (p.owner_id = ? OR p.id IN (
         SELECT project_id FROM project_members WHERE user_id = ?
-      )
+      ))
       ORDER BY p.created_at DESC
     `).bind(user.sub, user.sub).all()
+    rows = result.results
+  }
+
+  return jsonResponse({ projects: rows })
+}
+
+async function listTrash(user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
+  const expiry = Math.floor(Date.now() / 1000) - 30 * 86400
+
+  // Auto-purge projects in trash for more than 30 days
+  if (isSuperAdmin(user)) {
+    await env.DB.prepare('DELETE FROM projects WHERE deleted_at IS NOT NULL AND deleted_at < ?').bind(expiry).run()
+  } else {
+    await env.DB.prepare('DELETE FROM projects WHERE deleted_at IS NOT NULL AND deleted_at < ? AND owner_id = ?').bind(expiry, user.sub).run()
+  }
+
+  let rows
+  if (isSuperAdmin(user)) {
+    const result = await env.DB.prepare(`
+      SELECT p.*, u.name AS owner_name
+      FROM projects p
+      LEFT JOIN users u ON u.id = p.owner_id
+      WHERE p.deleted_at IS NOT NULL
+      ORDER BY p.deleted_at DESC
+    `).all()
+    rows = result.results
+  } else {
+    const result = await env.DB.prepare(`
+      SELECT p.*, u.name AS owner_name
+      FROM projects p
+      LEFT JOIN users u ON u.id = p.owner_id
+      WHERE p.deleted_at IS NOT NULL AND p.owner_id = ?
+      ORDER BY p.deleted_at DESC
+    `).bind(user.sub).all()
     rows = result.results
   }
 
@@ -138,7 +183,25 @@ async function updateProject(projectId: string, request: Request, user: Awaited<
   return jsonResponse({ project: updated })
 }
 
-async function deleteProject(projectId: string, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
+async function softDeleteProject(projectId: string, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
+  const project = await env.DB.prepare('SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL').bind(projectId).first<{ owner_id: string }>()
+  if (!project) return jsonResponse({ error: 'Project not found' }, 404)
+  if (!isSuperAdmin(user) && project.owner_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)
+
+  await env.DB.prepare('UPDATE projects SET deleted_at = ? WHERE id = ?').bind(Math.floor(Date.now() / 1000), projectId).run()
+  return jsonResponse({ success: true })
+}
+
+async function restoreProject(projectId: string, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
+  const project = await env.DB.prepare('SELECT * FROM projects WHERE id = ? AND deleted_at IS NOT NULL').bind(projectId).first<{ owner_id: string }>()
+  if (!project) return jsonResponse({ error: 'Project not found' }, 404)
+  if (!isSuperAdmin(user) && project.owner_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)
+
+  await env.DB.prepare('UPDATE projects SET deleted_at = NULL WHERE id = ?').bind(projectId).run()
+  return jsonResponse({ success: true })
+}
+
+async function permanentDeleteProject(projectId: string, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
   const project = await env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(projectId).first<{ owner_id: string }>()
   if (!project) return jsonResponse({ error: 'Project not found' }, 404)
   if (!isSuperAdmin(user) && project.owner_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)

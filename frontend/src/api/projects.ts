@@ -9,6 +9,7 @@ export interface Project {
   member_count?: number
   script_count?: number
   created_at: number
+  deleted_at?: number | null
 }
 
 export interface ProjectMember {
@@ -44,6 +45,15 @@ export const projectsApi = {
 
   delete: (token: string, id: string) =>
     api.delete<{ success: boolean }>(`/projects/${id}`, token),
+
+  trash: (token: string) =>
+    api.get<{ projects: Project[] }>('/projects/trash', token),
+
+  restore: (token: string, id: string) =>
+    api.post<{ success: boolean }>(`/projects/${id}/restore`, {}, token),
+
+  permanentDelete: (token: string, id: string) =>
+    api.delete<{ success: boolean }>(`/projects/${id}/permanent`, token),
 
   addMember: (token: string, projectId: string, userId: string) =>
     api.post<{ member: ProjectMember }>(`/projects/${projectId}/members`, { userId }, token),
