@@ -91,14 +91,6 @@ export default function ProjectDetailPage() {
           </Link>
           <h2 style={{ marginTop: '0.25rem' }}>{project?.name}</h2>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowUpload(true)}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-          Upload script
-        </button>
       </div>
 
       <div className="page-body">
@@ -109,55 +101,45 @@ export default function ProjectDetailPage() {
               <div className="section-card-header">
                 <h3>Scripts ({scripts.length})</h3>
               </div>
-              <div className="script-list">
-                {scripts.length === 0 ? (
-                  <div className="empty-state">
-                    <p>No scripts yet. Upload a PDF to get started.</p>
-                    <button className="btn btn-primary btn-sm" onClick={() => setShowUpload(true)}>
-                      Upload script
-                    </button>
-                  </div>
-                ) : (
-                  scripts.map((s) => (
-                    <div key={s.id} className="script-item">
-                      <div className="script-icon">
+              <div className="scripts-grid">
+                {scripts.map((s) => (
+                  <div key={s.id} className="script-card-wrap">
+                    <div className="script-card">
+                      <div className="script-card-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                           <polyline points="14 2 14 8 20 8" />
                         </svg>
                       </div>
-                      <div className="script-info">
-                        <div className="script-name">{s.name}</div>
-                        <div className="script-meta">
-                          {s.page_count ? `${s.page_count} pages · ` : ''}
-                          {formatDate(s.created_at)}
-                        </div>
+                      <div className="script-card-name">{s.name}</div>
+                      <div className="script-card-meta">
+                        {s.page_count ? `${s.page_count} trang · ` : ''}{formatDate(s.created_at)}
                       </div>
-                      <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
-                        <Link
-                          to={`/projects/${id}/scripts/${s.id}/viewer`}
-                          className="btn btn-secondary btn-sm"
-                        >
-                          Script Lining
-                        </Link>
-                        <Link
-                          to={`/projects/${id}/scripts/${s.id}/shotlist`}
-                          className="btn btn-secondary btn-sm"
-                        >
-                          Shotlist
-                        </Link>
-                        {canManage && (
-                          <button
-                            className="btn btn-danger btn-sm"
-                            onClick={() => handleDeleteScript(s.id)}
-                          >
-                            Delete
-                          </button>
-                        )}
+                      <div className="script-card-actions">
+                        <Link to={`/projects/${id}/scripts/${s.id}/viewer`} className="btn btn-secondary btn-sm">Script Lining</Link>
+                        <Link to={`/projects/${id}/scripts/${s.id}/shotlist`} className="btn btn-secondary btn-sm">Shotlist</Link>
                       </div>
                     </div>
-                  ))
-                )}
+                    {canManage && (
+                      <button className="script-card-delete" onClick={() => handleDeleteScript(s.id)} title="Delete script">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6l-1 14H6L5 6" />
+                          <path d="M10 11v6M14 11v6" />
+                          <path d="M9 6V4h6v2" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button className="script-card-add" onClick={() => setShowUpload(true)}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                  <span>Upload script</span>
+                </button>
               </div>
             </div>
           </div>

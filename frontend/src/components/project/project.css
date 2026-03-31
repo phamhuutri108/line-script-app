@@ -234,7 +234,114 @@
   letter-spacing: 0.5px;
 }
 
-/* ── Script list ── */
+/* ── Scripts grid ── */
+.scripts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.script-card-wrap {
+  position: relative;
+}
+
+.script-card {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  transition: border-color 0.15s;
+}
+
+.script-card:hover {
+  border-color: var(--color-primary);
+}
+
+.script-card-icon {
+  width: 32px;
+  height: 32px;
+  background: rgba(0, 74, 173, 0.12);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary);
+  margin-bottom: 0.25rem;
+}
+
+.script-card-icon svg { width: 16px; height: 16px; }
+
+.script-card-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.script-card-meta {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.script-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: auto;
+}
+
+.script-card-delete {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.script-card-wrap:hover .script-card-delete { opacity: 1; }
+.script-card-delete:hover { color: var(--color-danger); }
+
+.script-card-add {
+  background: none;
+  border: 2px dashed var(--color-border);
+  border-radius: 10px;
+  padding: 1rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  color: var(--color-text-muted);
+  min-height: 110px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.script-card-add:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.script-card-add span {
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+/* ── Script list (legacy, kept for reference) ── */
 .script-list {
   display: flex;
   flex-direction: column;
