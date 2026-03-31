@@ -22,6 +22,8 @@ export default function ProjectDetailPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [members, setMembers] = useState<ProjectMember[]>([])
   const [scripts, setScripts] = useState<Script[]>([])
+  const [trash, setTrash] = useState<Script[]>([])
+  const [showTrash, setShowTrash] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showUpload, setShowUpload] = useState(false)
@@ -50,17 +52,51 @@ export default function ProjectDetailPage() {
 
   async function handleDeleteScript(scriptId: string) {
     const ok = await showConfirm({
-      title: 'Xóa script',
-      message: 'Script này sẽ bị xóa vĩnh viễn và không thể khôi phục.',
-      confirmLabel: 'Xóa',
+      title: 'Chuyển vào Trash',
+      message: 'Script sẽ được chuyển vào Trash. Bạn có thể khôi phục lại trong vòng 30 ngày.',
+      confirmLabel: 'Chuyển vào Trash',
     })
     if (!ok) return
     try {
       await scriptsApi.delete(token!, scriptId)
       setScripts((prev) => prev.filter((s) => s.id !== scriptId))
+      if (showTrash) loadTrash()
     } catch (err) {
       alert(err instanceof ApiError ? err.message : 'Failed to delete script')
     }
+  }
+
+  async function loadTrash() {
+    try {
+      const data = await scriptsApi.trash(token!, id!)
+      setTrash(data.scripts)
+    } catch { /* ignore */ }
+  }
+
+  function toggleTrash() {
+    if (!showTrash) loadTrash()
+    setShowTrash((v) => !v)
+  }
+
+  async function handleRestoreScript(scriptId: string) {
+    try {
+      await scriptsApi.restore(token!, scriptId)
+      setTrash((prev) => prev.filter((s) => s.id !== scriptId))
+      loadProject()
+    } catch { /* ignore */ }
+  }
+
+  async function handlePermanentDeleteScript(scriptId: string) {
+    const ok = await showConfirm({
+      title: 'Xóa vĩnh viễn',
+      message: 'Script này sẽ bị xóa hoàn toàn và không thể khôi phục.',
+      confirmLabel: 'Xóa vĩnh viễn',
+    })
+    if (!ok) return
+    try {
+      await scriptsApi.permanentDelete(token!, scriptId)
+      setTrash((prev) => prev.filter((s) => s.id !== scriptId))
+    } catch { /* ignore */ }
   }
 
   async function handleRemoveMember(memberId: string) {
@@ -132,7 +168,7 @@ export default function ProjectDetailPage() {
                       </div>
                     </div>
                     {canManage && (
-                      <button className="script-card-delete" onClick={() => handleDeleteScript(s.id)} title="Delete script">
+                      <button className="script-card-delete" onClick={() => handleDeleteScript(s.id)} title="Chuyển vào Trash">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
                           <polyline points="3 6 5 6 21 6" />
                           <path d="M19 6l-1 14H6L5 6" />
@@ -152,6 +188,68 @@ export default function ProjectDetailPage() {
                   <span>Upload script</span>
                 </button>
               </div>
+
+              {/* Trash toggle */}
+              {canManage && (
+                <div style={{ borderTop: '1px solid var(--color-border)', marginTop: '0.75rem' }}>
+                  <button
+                    onClick={toggleTrash}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.4rem',
+                      background: 'none', border: 'none', color: 'var(--color-text-muted)',
+                      fontSize: '0.8rem', cursor: 'pointer', padding: '0.6rem 0.75rem',
+                      width: '100%', textAlign: 'left',
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6l-1 14H6L5 6" />
+                      <path d="M10 11v6M14 11v6" />
+                      <path d="M9 6V4h6v2" />
+                    </svg>
+                    Trash {trash.length > 0 && `(${trash.length})`}
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+                      style={{ marginLeft: 'auto', transform: showTrash ? 'rotate(180deg)' : undefined, transition: 'transform 0.15s' }}>
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+
+                  {showTrash && (
+                    <div style={{ padding: '0 0.75rem 0.75rem' }}>
+                      {trash.length === 0 ? (
+                        <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', padding: '0.5rem 0' }}>
+                          Trash trống
+                        </div>
+                      ) : (
+                        trash.map((s) => {
+                          const daysLeft = Math.max(0, 30 - Math.floor((Date.now() / 1000 - (s.deleted_at ?? 0)) / 86400))
+                          return (
+                            <div key={s.id} style={{
+                              display: 'flex', alignItems: 'center', gap: '0.5rem',
+                              padding: '0.45rem 0', borderBottom: '1px solid var(--color-border)',
+                            }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '0.82rem', color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {s.name}
+                                </div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                                  Tự xóa sau {daysLeft} ngày
+                                </div>
+                              </div>
+                              <button className="btn btn-secondary btn-sm" onClick={() => handleRestoreScript(s.id)}>
+                                Khôi phục
+                              </button>
+                              <button className="btn btn-danger btn-sm" onClick={() => handlePermanentDeleteScript(s.id)}>
+                                Xóa
+                              </button>
+                            </div>
+                          )
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

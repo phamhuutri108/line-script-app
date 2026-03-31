@@ -8,7 +8,7 @@ const MAX_PDF_SIZE = 50 * 1024 * 1024 // 50MB
 export async function handleScripts(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
   const parts = url.pathname.replace(/^\/scripts/, '').split('/').filter(Boolean)
-  // parts[0] = scriptId or 'upload', parts[1] = 'pdf'
+  // parts[0] = scriptId or 'upload' or 'trash', parts[1] = 'pdf' | 'restore' | 'permanent'
 
   // POST /scripts/upload — multipart form upload
   if (request.method === 'POST' && parts[0] === 'upload') {
@@ -16,10 +16,16 @@ export async function handleScripts(request: Request, env: Env): Promise<Respons
     return uploadScript(request, user, env)
   }
 
-  // GET /scripts/:id/pdf — stream from R2 (no auth required — URL is private by design)
+  // GET /scripts/:id/pdf — stream from R2
   if (request.method === 'GET' && parts[1] === 'pdf') {
     const user = await verifyAuth(request, env)
     return streamPdf(parts[0], user, env)
+  }
+
+  // GET /scripts/trash?projectId=
+  if (request.method === 'GET' && parts[0] === 'trash') {
+    const user = await verifyAuth(request, env)
+    return listTrash(url, user, env)
   }
 
   // GET /scripts?projectId=
@@ -28,10 +34,22 @@ export async function handleScripts(request: Request, env: Env): Promise<Respons
     return listScripts(url, user, env)
   }
 
-  // DELETE /scripts/:id
+  // POST /scripts/:id/restore
+  if (request.method === 'POST' && parts[1] === 'restore') {
+    const user = await verifyAuth(request, env)
+    return restoreScript(parts[0], user, env)
+  }
+
+  // DELETE /scripts/:id/permanent
+  if (request.method === 'DELETE' && parts[1] === 'permanent') {
+    const user = await verifyAuth(request, env)
+    return permanentDeleteScript(parts[0], user, env)
+  }
+
+  // DELETE /scripts/:id — soft delete
   if (request.method === 'DELETE' && parts.length === 1) {
     const user = await verifyAuth(request, env)
-    return deleteScript(parts[0], user, env)
+    return softDeleteScript(parts[0], user, env)
   }
 
   return jsonResponse({ error: 'Not found' }, 404)
@@ -59,7 +77,6 @@ async function uploadScript(request: Request, user: Awaited<ReturnType<typeof ve
     return jsonResponse({ error: 'File size exceeds 50MB limit' }, 400)
   }
 
-  // Check project access
   const project = await env.DB.prepare('SELECT id, owner_id FROM projects WHERE id = ?').bind(projectId).first<{ id: string; owner_id: string }>()
   if (!project) return jsonResponse({ error: 'Project not found' }, 404)
 
@@ -93,7 +110,6 @@ async function streamPdf(scriptId: string, user: Awaited<ReturnType<typeof verif
 
   if (!script) return jsonResponse({ error: 'Script not found' }, 404)
 
-  // Check access
   if (!isSuperAdmin(user)) {
     const access = await env.DB.prepare(
       'SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?'
@@ -118,7 +134,6 @@ async function listScripts(url: URL, user: Awaited<ReturnType<typeof verifyAuth>
   const projectId = url.searchParams.get('projectId')
   if (!projectId) return jsonResponse({ error: 'projectId is required' }, 400)
 
-  // Check project access
   const project = await env.DB.prepare('SELECT id, owner_id FROM projects WHERE id = ?').bind(projectId).first<{ id: string; owner_id: string }>()
   if (!project) return jsonResponse({ error: 'Project not found' }, 404)
 
@@ -130,28 +145,83 @@ async function listScripts(url: URL, user: Awaited<ReturnType<typeof verifyAuth>
   }
 
   const result = await env.DB.prepare(
-    'SELECT id, name, page_count, uploaded_by, created_at FROM scripts WHERE project_id = ? ORDER BY created_at DESC'
+    'SELECT id, name, page_count, uploaded_by, created_at FROM scripts WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC'
   ).bind(projectId).all()
 
   return jsonResponse({ scripts: result.results })
 }
 
-async function deleteScript(scriptId: string, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
+async function listTrash(url: URL, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
+  const projectId = url.searchParams.get('projectId')
+  if (!projectId) return jsonResponse({ error: 'projectId is required' }, 400)
+
+  const project = await env.DB.prepare('SELECT id, owner_id FROM projects WHERE id = ?').bind(projectId).first<{ id: string; owner_id: string }>()
+  if (!project) return jsonResponse({ error: 'Project not found' }, 404)
+
+  if (!isSuperAdmin(user)) {
+    const access = await env.DB.prepare(
+      'SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?'
+    ).bind(projectId, user.sub).first()
+    if (!access && project.owner_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)
+  }
+
+  // Auto-purge scripts older than 30 days
+  const expiry = Math.floor(Date.now() / 1000) - 30 * 86400
+  const old = await env.DB.prepare(
+    'SELECT id, r2_key FROM scripts WHERE project_id = ? AND deleted_at IS NOT NULL AND deleted_at < ?'
+  ).bind(projectId, expiry).all<{ id: string; r2_key: string }>()
+  for (const s of old.results) {
+    await env.SCRIPTS_BUCKET.delete(s.r2_key)
+    await env.DB.prepare('DELETE FROM scripts WHERE id = ?').bind(s.id).run()
+  }
+
+  const result = await env.DB.prepare(
+    'SELECT id, name, page_count, uploaded_by, created_at, deleted_at FROM scripts WHERE project_id = ? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC'
+  ).bind(projectId).all()
+
+  return jsonResponse({ scripts: result.results })
+}
+
+async function softDeleteScript(scriptId: string, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
+  const script = await env.DB.prepare(
+    'SELECT s.*, p.owner_id AS project_owner FROM scripts s JOIN projects p ON p.id = s.project_id WHERE s.id = ?'
+  ).bind(scriptId).first<{ uploaded_by: string; project_owner: string }>()
+
+  if (!script) return jsonResponse({ error: 'Script not found' }, 404)
+  if (!isSuperAdmin(user) && script.uploaded_by !== user.sub && script.project_owner !== user.sub) {
+    return jsonResponse({ error: 'Forbidden' }, 403)
+  }
+
+  const now = Math.floor(Date.now() / 1000)
+  await env.DB.prepare('UPDATE scripts SET deleted_at = ? WHERE id = ?').bind(now, scriptId).run()
+  return jsonResponse({ success: true })
+}
+
+async function restoreScript(scriptId: string, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
+  const script = await env.DB.prepare(
+    'SELECT s.*, p.owner_id AS project_owner FROM scripts s JOIN projects p ON p.id = s.project_id WHERE s.id = ?'
+  ).bind(scriptId).first<{ uploaded_by: string; project_owner: string }>()
+
+  if (!script) return jsonResponse({ error: 'Script not found' }, 404)
+  if (!isSuperAdmin(user) && script.uploaded_by !== user.sub && script.project_owner !== user.sub) {
+    return jsonResponse({ error: 'Forbidden' }, 403)
+  }
+
+  await env.DB.prepare('UPDATE scripts SET deleted_at = NULL WHERE id = ?').bind(scriptId).run()
+  return jsonResponse({ success: true })
+}
+
+async function permanentDeleteScript(scriptId: string, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
   const script = await env.DB.prepare(
     'SELECT s.*, p.owner_id AS project_owner FROM scripts s JOIN projects p ON p.id = s.project_id WHERE s.id = ?'
   ).bind(scriptId).first<{ r2_key: string; uploaded_by: string; project_owner: string }>()
 
   if (!script) return jsonResponse({ error: 'Script not found' }, 404)
-
-  // Only uploader, project owner, or super_admin can delete
   if (!isSuperAdmin(user) && script.uploaded_by !== user.sub && script.project_owner !== user.sub) {
     return jsonResponse({ error: 'Forbidden' }, 403)
   }
 
-  // Delete from R2 first
   await env.SCRIPTS_BUCKET.delete(script.r2_key)
-  // Delete from DB (cascades to lines, annotations, shots)
   await env.DB.prepare('DELETE FROM scripts WHERE id = ?').bind(scriptId).run()
-
   return jsonResponse({ success: true })
 }

@@ -26,6 +26,7 @@ export interface Script {
   page_count: number | null
   uploaded_by?: string
   created_at: number
+  deleted_at?: number | null
   sheets_id?: string | null
   sheets_url?: string | null
 }
@@ -85,6 +86,15 @@ export const scriptsApi = {
 
   delete: (token: string, id: string) =>
     api.delete<{ success: boolean }>(`/scripts/${id}`, token),
+
+  trash: (token: string, projectId: string) =>
+    api.get<{ scripts: Script[] }>(`/scripts/trash?projectId=${projectId}`, token),
+
+  restore: (token: string, id: string) =>
+    api.post<{ success: boolean }>(`/scripts/${id}/restore`, {}, token),
+
+  permanentDelete: (token: string, id: string) =>
+    api.delete<{ success: boolean }>(`/scripts/${id}/permanent`, token),
 
   getPdfUrl: (id: string) =>
     `${import.meta.env.VITE_API_URL}/scripts/${id}/pdf`,
