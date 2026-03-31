@@ -80,7 +80,7 @@ export default function DashboardPage() {
     setShowTrash((v) => !v)
   }
 
-  const canCreateProject = user?.role === 'super_admin' || user?.role === 'owner'
+  const canCreateProject = !!user && user.role !== 'pending'
   const canDelete = (p: Project) => user?.role === 'super_admin' || p.owner_id === user?.id
 
   return (

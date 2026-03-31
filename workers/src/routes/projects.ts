@@ -1,4 +1,4 @@
-import { verifyAuth, isSuperAdmin, requireOwnerOrAbove } from '../middleware/auth'
+import { verifyAuth, isSuperAdmin } from '../middleware/auth'
 import { jsonResponse } from '../utils'
 import { generateId } from '../utils'
 import type { Env } from '../index'
@@ -15,7 +15,6 @@ export async function handleProjects(request: Request, env: Env): Promise<Respon
   }
   // POST /projects
   if (request.method === 'POST' && parts.length === 0) {
-    requireOwnerOrAbove(user)
     return createProject(request, user, env)
   }
   // GET /projects/trash
@@ -213,7 +212,14 @@ async function permanentDeleteProject(projectId: string, user: Awaited<ReturnTyp
 async function addMember(projectId: string, request: Request, user: Awaited<ReturnType<typeof verifyAuth>>, env: Env): Promise<Response> {
   const project = await env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(projectId).first<{ owner_id: string }>()
   if (!project) return jsonResponse({ error: 'Project not found' }, 404)
-  if (!isSuperAdmin(user) && project.owner_id !== user.sub) return jsonResponse({ error: 'Forbidden' }, 403)
+  // Any member of the project can add others; non-members are forbidden
+  if (!isSuperAdmin(user)) {
+    const isMember = await env.DB.prepare(
+      'SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?'
+    ).bind(projectId, user.sub).first()
+    const isOwner = project.owner_id === user.sub
+    if (!isMember && !isOwner) return jsonResponse({ error: 'Forbidden' }, 403)
+  }
 
   let body: { userId?: string }
   try { body = await request.json() } catch { return jsonResponse({ error: 'Invalid JSON' }, 400) }
