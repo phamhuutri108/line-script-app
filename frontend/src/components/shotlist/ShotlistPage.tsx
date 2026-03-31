@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { shotsApi, type Shot, type ShotUpdate } from '../../api/shots'
 import { scriptsApi, projectsApi, type Script } from '../../api/projects'
@@ -19,6 +19,7 @@ const SIDE_OPTIONS = ['', 'L', 'R', 'L/R']
 
 export default function ShotlistPage() {
   const { id: projectId, scriptId } = useParams<{ id: string; scriptId: string }>()
+  const [searchParams] = useSearchParams()
   const { token } = useAuthStore()
   const [shots, setShots] = useState<Shot[]>([])
   const [script, setScript] = useState<Script | null>(null)
@@ -32,6 +33,16 @@ export default function ShotlistPage() {
   const [syncing, setSyncing] = useState(false)
 
   useEffect(() => { loadData() }, [scriptId])
+
+  // Scroll to and open shot from ?shot= param after data loads
+  useEffect(() => {
+    const shotId = searchParams.get('shot')
+    if (!shotId || loading) return
+    setEditingId(shotId)
+    setTimeout(() => {
+      document.getElementById(`shot-${shotId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 100)
+  }, [loading])
 
   async function loadData() {
     setLoading(true)
@@ -315,7 +326,7 @@ function ShotRow({ shot, isEditing, onEdit, onClose, onUpdate, onDelete }: RowPr
 
   if (isEditing) {
     return (
-      <tr ref={rowRef} className="sl-row sl-row-editing" onKeyDown={handleKeyDown}>
+      <tr ref={rowRef} id={`shot-${shot.id}`} className="sl-row sl-row-editing" onKeyDown={handleKeyDown}>
         <td className="sl-td sl-td-num">{shot.shot_number}</td>
         <td className="sl-td"><input className="sl-input" value={val('scene_number')} onChange={(e) => set('scene_number', e.target.value)} placeholder="1" /></td>
         <td className="sl-td"><input className="sl-input" value={val('location')} onChange={(e) => set('location', e.target.value)} placeholder="Location" /></td>
@@ -374,7 +385,7 @@ function ShotRow({ shot, isEditing, onEdit, onClose, onUpdate, onDelete }: RowPr
   }
 
   return (
-    <tr className="sl-row" onClick={onEdit}>
+    <tr id={`shot-${shot.id}`} className="sl-row" onClick={onEdit}>
       <td className="sl-td sl-td-num">{shot.shot_number}</td>
       <td className="sl-td sl-td-center">{shot.scene_number ?? '—'}</td>
       <td className="sl-td">{shot.location ?? '—'}</td>

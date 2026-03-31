@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { shotsApi, type Shot, type ShotUpdate } from '../../api/shots'
 import { useAuthStore } from '../../stores/authStore'
 import { ApiError } from '../../api/client'
-import * as XLSX from 'xlsx'
 import { showConfirm } from '../shared/ConfirmDialog'
 
 interface Props {
   scriptId: string
+  projectId: string
   highlightLineId?: string | null
   onShotClick?: (shot: Shot) => void
   onJumpToLine?: (lineId: string, pageNum: number) => void
@@ -19,15 +20,24 @@ const MOVEMENT_OPTIONS = ['', 'Static', 'Pan', 'Tilt', 'Dolly', 'Tracking', 'Han
 const INT_EXT_OPTIONS = ['', 'INT', 'EXT', 'INT/EXT']
 const DAY_NIGHT_OPTIONS = ['', 'DAY', 'NIGHT', 'DAWN', 'DUSK']
 const SHOT_TYPE_OPTIONS = ['', 'Single', 'Two', 'Three', 'Group', 'Observe', 'Insert', 'POV', 'OTS']
-const SIDE_OPTIONS = ['', 'L', 'R', 'L/R']
 
-export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, onJumpToLine, refreshTrigger }: Props) {
+function extractIntExt(shot: Shot): string {
+  if (shot.int_ext) return shot.int_ext
+  const m = (shot.description ?? '').match(/^(INT|EXT|INT\/EXT)/i)
+  return m ? m[1].toUpperCase() : ''
+}
+
+function extractDayNight(shot: Shot): string {
+  if (shot.day_night) return shot.day_night
+  const m = (shot.description ?? '').match(/[-–]\s*(DAY|NIGHT|DAWN|DUSK)\b/i)
+  return m ? m[1].toUpperCase() : ''
+}
+
+export default function ShotlistPanel({ scriptId, projectId, highlightLineId, onShotClick, onJumpToLine, refreshTrigger }: Props) {
   const { token } = useAuthStore()
   const [shots, setShots] = useState<Shot[]>([])
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [shareUrl, setShareUrl] = useState('')
-  const [sharing, setSharing] = useState(false)
 
   useEffect(() => {
     loadShots()
@@ -64,87 +74,30 @@ export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, 
     }
   }
 
-  async function handleShare() {
-    setSharing(true)
-    try {
-      const data = await shotsApi.createShareToken(token!, scriptId)
-      const url = `${window.location.origin}/share/${data.token}`
-      setShareUrl(url)
-      await navigator.clipboard.writeText(url)
-    } catch {
-      alert('Failed to create share link')
-    } finally {
-      setSharing(false)
-    }
-  }
+  const highlightedIdx = highlightLineId
+    ? shots.findIndex((s) => s.line_id === highlightLineId)
+    : -1
 
-  function exportCsv() {
-    const headers = ['#', 'Scene', 'Location', 'INT/EXT', 'Day/Night', 'Description', 'Dialogue', 'Subjects', 'Script Time', 'Shot Size', 'Shot Type', 'Side', 'Angle', 'Movement', 'Lens', 'Notes']
-    const rows = shots.map((s) => [
-      s.shot_number, s.scene_number, s.location, s.int_ext, s.day_night,
-      s.description, s.dialogue, s.subjects, s.script_time,
-      s.shot_size, s.shot_type, s.side, s.angle, s.movement, s.lens, s.notes,
-    ])
-    const csv = [headers, ...rows].map((r) => r.map((v) => {
-      const val = String(v ?? '')
-      return val.includes(',') || val.includes('"') ? `"${val.replace(/"/g, '""')}"` : val
-    }).join(',')).join('\r\n')
-    download(new Blob([csv], { type: 'text/csv' }), 'shotlist.csv')
-  }
-
-  function exportXlsx() {
-    const data = shots.map((s) => ({
-      '#': s.shot_number,
-      'Scene': s.scene_number,
-      'Location': s.location,
-      'INT/EXT': s.int_ext,
-      'Day/Night': s.day_night,
-      'Description': s.description,
-      'Dialogue': s.dialogue,
-      'Subjects': s.subjects,
-      'Script Time': s.script_time,
-      'Shot Size': s.shot_size,
-      'Shot Type': s.shot_type,
-      'Side': s.side,
-      'Angle': s.angle,
-      'Movement': s.movement,
-      'Lens': s.lens,
-      'Notes': s.notes,
-    }))
-    const ws = XLSX.utils.json_to_sheet(data)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Shotlist')
-    XLSX.writeFile(wb, 'shotlist.xlsx')
-  }
-
-  function download(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = filename; a.click()
-    URL.revokeObjectURL(url)
-  }
+  const headerLabel = highlightedIdx >= 0
+    ? `${highlightedIdx + 1}/${shots.length}`
+    : `${shots.length} shots`
 
   return (
     <div className="shotlist-panel">
       <div className="shotlist-panel-header">
-        <span>Shotlist ({shots.length})</span>
-        <div style={{ display: 'flex', gap: '0.4rem' }}>
-          <button className="btn-icon" onClick={exportCsv} title="Export CSV" style={{ width: 26, height: 26, fontSize: '0.65rem' }}>CSV</button>
-          <button className="btn-icon" onClick={exportXlsx} title="Export XLSX" style={{ width: 26, height: 26, fontSize: '0.65rem' }}>XLS</button>
-          <button className="btn-icon" onClick={handleShare} disabled={sharing} title="Copy share link" style={{ width: 26, height: 26 }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
-              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-            </svg>
-          </button>
-        </div>
+        <span style={{ fontWeight: 700, fontSize: '0.82rem' }}>{headerLabel}</span>
+        <Link
+          to={`/projects/${projectId}/scripts/${scriptId}/shotlist`}
+          className="btn-icon"
+          title="Mở Shotlist đầy đủ"
+          style={{ display: 'flex', alignItems: 'center', gap: '3px', padding: '0 8px', width: 'auto', fontSize: '0.72rem', fontWeight: 600, textDecoration: 'none' }}
+        >
+          Shotlist
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </Link>
       </div>
-
-      {shareUrl && (
-        <div style={{ padding: '0.5rem 0.75rem', background: 'rgba(92,224,138,0.1)', borderBottom: '1px solid var(--color-border)', fontSize: '0.72rem', color: 'var(--color-success)' }}>
-          Link copied! <span style={{ opacity: 0.7, wordBreak: 'break-all' }}>{shareUrl}</span>
-        </div>
-      )}
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading ? (
@@ -153,7 +106,7 @@ export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, 
           </div>
         ) : shots.length === 0 ? (
           <div style={{ padding: '1.5rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.8rem', textAlign: 'center' }}>
-            Draw lines on the PDF to generate shots
+            Vẽ line trên kịch bản để tạo shot
           </div>
         ) : (
           shots.map((shot) => (
@@ -169,6 +122,8 @@ export default function ShotlistPanel({ scriptId, highlightLineId, onShotClick, 
               onClick={() => onShotClick?.(shot)}
               onJumpToLine={shot.line_id && shot.page_number ? () => onJumpToLine?.(shot.line_id!, shot.page_number!) : undefined}
               onShotChanged={(updated) => setShots((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
+              projectId={projectId}
+              scriptId={scriptId}
             />
           ))
         )}
@@ -188,10 +143,13 @@ interface RowProps {
   onClick: () => void
   onJumpToLine?: () => void
   onShotChanged: (updated: Shot) => void
+  projectId: string
+  scriptId: string
 }
 
-function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, onDelete, onClick, onJumpToLine, onShotChanged }: RowProps) {
+function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, onDelete, onClick, onJumpToLine, onShotChanged, projectId, scriptId }: RowProps) {
   const { token } = useAuthStore()
+  const navigate = useNavigate()
   const [draft, setDraft] = useState<ShotUpdate>({})
   const [uploading, setUploading] = useState(false)
   const [driveError, setDriveError] = useState<string | null>(null)
@@ -220,6 +178,7 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
     await shotsApi.deleteStoryboard(token!, shot.id)
     onShotChanged({ ...shot, storyboard_drive_id: null, storyboard_view_url: null })
   }
+
   const hasChanges = Object.keys(draft).length > 0
 
   function set(field: keyof ShotUpdate, value: string) {
@@ -236,9 +195,13 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
     return (draft[field] !== undefined ? draft[field] : shot[field]) as string ?? ''
   }
 
+  const intExt = extractIntExt(shot)
+  const dayNight = extractDayNight(shot)
+
   return (
     <div
       className={`shot-row${isHighlighted ? ' highlighted' : ''}`}
+      id={`panel-shot-${shot.id}`}
       style={{
         borderBottom: '1px solid var(--color-border)',
         background: isHighlighted ? 'rgba(108,99,255,0.08)' : undefined,
@@ -262,11 +225,11 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {shot.scene_number ? `Scene ${shot.scene_number}` : `Shot ${shot.shot_number}`}
+            {shot.scene_number ? `Cảnh ${shot.scene_number}` : `Shot ${shot.shot_number}`}
             {shot.location ? ` — ${shot.location}` : ''}
           </div>
           <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-            {[shot.int_ext, shot.day_night, shot.shot_size].filter(Boolean).join(' · ') || 'No details yet'}
+            {[intExt, dayNight, shot.shot_size].filter(Boolean).join(' · ') || 'Chưa có thông tin'}
           </div>
         </div>
         {shot.storyboard_view_url && (
@@ -297,18 +260,23 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
       {isEditing && (
         <div style={{ padding: '0 0.75rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           <ShotField label="Scene #" value={val('scene_number')} onChange={(v) => set('scene_number', v)} />
-          <ShotField label="Location" value={val('location')} onChange={(v) => set('location', v)} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
             <ShotSelect label="INT/EXT" options={INT_EXT_OPTIONS} value={val('int_ext')} onChange={(v) => set('int_ext', v)} />
             <ShotSelect label="Day/Night" options={DAY_NIGHT_OPTIONS} value={val('day_night')} onChange={(v) => set('day_night', v)} />
           </div>
-          {/* Two-part description */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+            <ShotSelect label="Size" options={SHOT_SIZE_OPTIONS} value={val('shot_size')} onChange={(v) => set('shot_size', v)} />
+            <ShotSelect label="Type" options={SHOT_TYPE_OPTIONS} value={val('shot_type')} onChange={(v) => set('shot_type', v)} />
+          </div>
+          <ShotSelect label="Angle" options={ANGLE_OPTIONS} value={val('angle')} onChange={(v) => set('angle', v)} />
+          <ShotSelect label="Movement" options={MOVEMENT_OPTIONS} value={val('movement')} onChange={(v) => set('movement', v)} />
+          <ShotField label="Lens" value={val('lens')} onChange={(v) => set('lens', v)} placeholder="e.g. 50mm" />
           <div>
             <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Ghi chú</div>
             <textarea
               value={(draft['user_notes'] !== undefined ? draft['user_notes'] : shot.user_notes) ?? ''}
               onChange={(e) => set('user_notes', e.target.value)}
-              placeholder="Ghi chú của bạn về shot này…"
+              placeholder="Ghi chú về shot này…"
               style={{
                 width: '100%', background: 'var(--color-bg)', border: '1px solid var(--color-border)',
                 borderRadius: '6px', padding: '0.4rem 0.5rem', color: 'var(--color-text)',
@@ -318,35 +286,18 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
           </div>
           {shot.description && (
             <div className="auto-description-block">
-              <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginBottom: '2px' }}>
-                Trích từ kịch bản
-              </div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginBottom: '2px' }}>Trích từ kịch bản</div>
               <div className="auto-description-text">{shot.description}</div>
             </div>
           )}
-          <ShotField label="Dialogue" value={val('dialogue')} onChange={(v) => set('dialogue', v)} multiline />
-          <ShotField label="Subjects" value={val('subjects')} onChange={(v) => set('subjects', v)} placeholder="Characters in frame" />
-          <ShotField label="Script Time" value={val('script_time')} onChange={(v) => set('script_time', v)} placeholder="00:30" />
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-            <ShotSelect label="Size" options={SHOT_SIZE_OPTIONS} value={val('shot_size')} onChange={(v) => set('shot_size', v)} />
-            <ShotSelect label="Type" options={SHOT_TYPE_OPTIONS} value={val('shot_type')} onChange={(v) => set('shot_type', v)} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-            <ShotSelect label="Side" options={SIDE_OPTIONS} value={val('side')} onChange={(v) => set('side', v)} />
-            <ShotSelect label="Angle" options={ANGLE_OPTIONS} value={val('angle')} onChange={(v) => set('angle', v)} />
-          </div>
-          <ShotSelect label="Movement" options={MOVEMENT_OPTIONS} value={val('movement')} onChange={(v) => set('movement', v)} />
-          <ShotField label="Lens" value={val('lens')} onChange={(v) => set('lens', v)} placeholder="e.g. 50mm" />
-          <ShotField label="Notes" value={val('notes')} onChange={(v) => set('notes', v)} multiline />
 
           {/* Storyboard */}
           <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
             <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>Storyboard</div>
             {driveError === 'GOOGLE_NOT_CONNECTED' ? (
               <div style={{ fontSize: '0.75rem', color: 'var(--color-warning, #f59e0b)', background: 'rgba(245,158,11,0.08)', borderRadius: '6px', padding: '0.5rem 0.6rem' }}>
-                Google Drive not connected.{' '}
-                <a href="/settings" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }}>Connect in Settings</a>
-                {' '}to use storyboard upload.
+                Google Drive chưa kết nối.{' '}
+                <a href="/settings" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }}>Kết nối trong Settings</a>
               </div>
             ) : driveError ? (
               <div style={{ fontSize: '0.75rem', color: 'var(--color-danger, #ef4444)' }}>{driveError}</div>
@@ -354,7 +305,7 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
             {shot.storyboard_view_url ? (
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <img src={shot.storyboard_view_url} alt="storyboard" style={{ height: 54, borderRadius: '4px', border: '1px solid var(--color-border)', objectFit: 'cover' }} />
-                <button className="btn btn-danger btn-sm" onClick={handleStoryboardDelete} style={{ fontSize: '0.7rem' }}>Remove</button>
+                <button className="btn btn-danger btn-sm" onClick={handleStoryboardDelete} style={{ fontSize: '0.7rem' }}>Xóa</button>
               </div>
             ) : (
               <label style={{ display: 'inline-block', cursor: 'pointer' }}>
@@ -365,17 +316,24 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleStoryboardUpload(f) }}
                 />
                 <span className="btn btn-sm" style={{ fontSize: '0.75rem', opacity: uploading ? 0.6 : 1, pointerEvents: uploading ? 'none' : 'auto' }}>
-                  {uploading ? 'Uploading…' : '+ Upload image'}
+                  {uploading ? 'Đang upload…' : '+ Thêm ảnh'}
                 </span>
               </label>
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
             <button className="btn btn-primary btn-sm" onClick={handleSave} style={{ flex: 1 }}>
-              {hasChanges ? 'Save' : 'Close'}
+              {hasChanges ? 'Lưu' : 'Đóng'}
             </button>
-            <button className="btn btn-danger btn-sm" onClick={onDelete}>Delete</button>
+            <button
+              className="btn btn-sm"
+              style={{ fontSize: '0.72rem' }}
+              onClick={() => navigate(`/projects/${projectId}/scripts/${scriptId}/shotlist?shot=${shot.id}`)}
+            >
+              → Shotlist
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={onDelete}>Xóa</button>
           </div>
         </div>
       )}

@@ -338,6 +338,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
 
         <ShotlistPanel
           scriptId={scriptId}
+          projectId={projectId}
           highlightLineId={highlightLineId}
           onShotClick={handleShotClick}
           onJumpToLine={handleJumpToLine}
