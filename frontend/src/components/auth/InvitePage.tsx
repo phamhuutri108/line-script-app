@@ -72,7 +72,7 @@ export default function InvitePage() {
       <div className="auth-page">
         <div className="auth-card">
           <div className="auth-logo">
-            <h1>Line Script</h1>
+            <h1>Script Lining</h1>
           </div>
           <div style={{ textAlign: 'center', padding: '2rem 0', color: 'var(--color-text-muted)' }}>
             <div className="spinner" style={{ margin: '0 auto 1rem' }} />
@@ -88,7 +88,7 @@ export default function InvitePage() {
       <div className="auth-page">
         <div className="auth-card">
           <div className="auth-logo">
-            <h1>Line Script</h1>
+            <h1>Script Lining</h1>
           </div>
           <div className="auth-error" style={{ marginBottom: '1rem' }}>{loadError}</div>
           <Link to="/login" className="btn-primary" style={{ display: 'block', textAlign: 'center' }}>
@@ -103,7 +103,7 @@ export default function InvitePage() {
     <div className="auth-page">
       <div className="auth-card">
         <div className="auth-logo">
-          <h1>Line Script</h1>
+          <h1>Script Lining</h1>
           <p>Bạn được mời tham gia</p>
         </div>
 

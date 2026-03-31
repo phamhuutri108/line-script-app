@@ -51,7 +51,7 @@ export default function SharePage() {
             <h1 className="share-title">{data.scriptName}</h1>
             <p className="share-subtitle">{data.shots.length} shot · Chia sẻ công khai</p>
           </div>
-          <div className="share-badge">Line Script</div>
+          <div className="share-badge">Script Lining</div>
         </div>
       </header>
 

@@ -163,7 +163,7 @@ export default function ShotlistPage() {
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
-            Line Script
+            Script Lining
           </Link>
           <button className="sl-action-btn" onClick={exportCsv}>CSV</button>
           <button className="sl-action-btn" onClick={exportXlsx}>XLSX</button>
@@ -229,8 +229,8 @@ export default function ShotlistPage() {
           <div className="sl-empty"><div className="spinner" /></div>
         ) : shots.length === 0 ? (
           <div className="sl-empty">
-            <p>No shots yet. Open Line Script to draw lines on the PDF and generate shots.</p>
-            <Link to={`/projects/${projectId}/scripts/${scriptId}/viewer`} className="sl-action-btn">Open Line Script</Link>
+            <p>No shots yet. Open Script Lining to draw lines on the PDF and generate shots.</p>
+            <Link to={`/projects/${projectId}/scripts/${scriptId}/viewer`} className="sl-action-btn">Open Script Lining</Link>
           </div>
         ) : (
           <table className="sl-table">

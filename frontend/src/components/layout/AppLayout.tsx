@@ -23,7 +23,7 @@ export default function AppLayout() {
       {/* Desktop sidebar */}
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <h1>Line Script</h1>
+          <h1>Script Lining</h1>
           <p>Filmmaking tool</p>
         </div>
 

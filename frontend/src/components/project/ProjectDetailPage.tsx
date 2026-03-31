@@ -138,7 +138,7 @@ export default function ProjectDetailPage() {
                           to={`/projects/${id}/scripts/${s.id}/viewer`}
                           className="btn btn-secondary btn-sm"
                         >
-                          Line Script
+                          Script Lining
                         </Link>
                         <Link
                           to={`/projects/${id}/scripts/${s.id}/shotlist`}
