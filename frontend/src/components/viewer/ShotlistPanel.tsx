@@ -11,6 +11,7 @@ interface Props {
   highlightLineId?: string | null
   onShotClick?: (shot: Shot) => void
   onJumpToLine?: (lineId: string, pageNum: number) => void
+  onShotUpdated?: (shot: Shot) => void
   refreshTrigger?: number
 }
 
@@ -33,7 +34,7 @@ function extractDayNight(shot: Shot): string {
   return m ? m[1].toUpperCase() : ''
 }
 
-export default function ShotlistPanel({ scriptId, projectId, highlightLineId, onShotClick, onJumpToLine, refreshTrigger }: Props) {
+export default function ShotlistPanel({ scriptId, projectId, highlightLineId, onShotClick, onJumpToLine, onShotUpdated, refreshTrigger }: Props) {
   const { token } = useAuthStore()
   const [shots, setShots] = useState<Shot[]>([])
   const [loading, setLoading] = useState(true)
@@ -58,6 +59,7 @@ export default function ShotlistPanel({ scriptId, projectId, highlightLineId, on
     try {
       const res = await shotsApi.update(token!, shotId, data)
       setShots((prev) => prev.map((s) => s.id === shotId ? res.shot : s))
+      onShotUpdated?.(res.shot)
     } catch (err) {
       alert(err instanceof ApiError ? err.message : 'Failed to update shot')
     }

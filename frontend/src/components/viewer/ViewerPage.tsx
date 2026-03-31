@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useAuthStore } from '../../stores/authStore'
 import { scriptsApi, type Script } from '../../api/projects'
 import { ApiError } from '../../api/client'
@@ -8,7 +8,10 @@ import './viewer.css'
 
 export default function ViewerPage() {
   const { id: projectId, scriptId } = useParams<{ id: string; scriptId: string }>()
+  const [searchParams] = useSearchParams()
   const { token } = useAuthStore()
+  const initialLineId = searchParams.get('line') ?? undefined
+  const initialPage = parseInt(searchParams.get('page') ?? '1', 10) || 1
 
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
   const [script, setScript] = useState<Script | null>(null)
@@ -69,6 +72,8 @@ export default function ViewerPage() {
       scriptId={scriptId!}
       scriptName={script?.name ?? 'Script'}
       projectId={projectId!}
+      initialLineId={initialLineId}
+      initialPage={initialPage > 1 ? initialPage : undefined}
     />
   )
 }

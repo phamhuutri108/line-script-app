@@ -15,13 +15,15 @@ interface Props {
   scriptId: string
   scriptName: string
   projectId: string
+  initialLineId?: string
+  initialPage?: number
 }
 
 const ZOOM_STEP = 0.25
 const ZOOM_MIN = 0.5
 const ZOOM_MAX = 3
 
-export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: Props) {
+export default function PDFViewer({ pdfData, scriptId, scriptName, projectId, initialLineId, initialPage }: Props) {
   const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null)
   const pdfCanvasRef = useRef<HTMLCanvasElement>(null)
   const renderTaskRef = useRef<pdfjsLib.RenderTask | null>(null)
@@ -55,7 +57,11 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
     loadingTask.promise.then((doc) => {
       pdfDocRef.current = doc
       setNumPages(doc.numPages)
-      renderPage(1, zoom, doc)
+      const startPage = initialPage ?? 1
+      setCurrentPage(startPage)
+      setPageInputVal(String(startPage))
+      renderPage(startPage, zoom, doc)
+      if (initialLineId) setHighlightLineId(initialLineId)
     }).catch((err) => {
       console.error('PDF load error:', err)
     })
@@ -342,6 +348,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId }: 
           highlightLineId={highlightLineId}
           onShotClick={handleShotClick}
           onJumpToLine={handleJumpToLine}
+          onShotUpdated={handleShotUpdated}
           refreshTrigger={shotRefresh}
         />
       </div>

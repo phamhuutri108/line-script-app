@@ -280,6 +280,8 @@ export default function ShotlistPage() {
                   onUpdate={(data) => handleUpdate(shot.id, data)}
                   onDelete={() => handleDelete(shot.id)}
                   onShotChanged={(updated) => setShots((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
+                  projectId={projectId!}
+                  scriptId={scriptId!}
                 />
               ))}
             </tbody>
@@ -298,9 +300,11 @@ interface RowProps {
   onUpdate: (data: ShotUpdate) => void
   onDelete: () => void
   onShotChanged: (updated: Shot) => void
+  projectId: string
+  scriptId: string
 }
 
-function ShotRow({ shot, isEditing, onEdit, onClose, onUpdate, onDelete }: RowProps) {
+function ShotRow({ shot, isEditing, onEdit, onClose, onUpdate, onDelete, projectId, scriptId }: RowProps) {
   const [draft, setDraft] = useState<ShotUpdate>({})
   const rowRef = useRef<HTMLTableRowElement>(null)
   const hasChanges = Object.keys(draft).length > 0
@@ -379,6 +383,14 @@ function ShotRow({ shot, isEditing, onEdit, onClose, onUpdate, onDelete }: RowPr
         <td className="sl-td sl-td-actions">
           <button className="sl-btn-save" onClick={handleSave}>{hasChanges ? 'Save' : 'Close'}</button>
           <button className="sl-btn-del" onClick={onDelete}>Del</button>
+          {shot.line_id && shot.page_number && (
+            <Link
+              to={`/projects/${projectId}/scripts/${scriptId}/viewer?line=${shot.line_id}&page=${shot.page_number}`}
+              className="sl-btn-edit"
+              onClick={(e) => e.stopPropagation()}
+              title="Xem trong Script Lining"
+            >→</Link>
+          )}
         </td>
       </tr>
     )
@@ -409,6 +421,14 @@ function ShotRow({ shot, isEditing, onEdit, onClose, onUpdate, onDelete }: RowPr
       <td className="sl-td">{shot.notes ?? '—'}</td>
       <td className="sl-td sl-td-actions">
         <button className="sl-btn-edit" onClick={(e) => { e.stopPropagation(); onEdit() }}>Edit</button>
+        {shot.line_id && shot.page_number && (
+          <Link
+            to={`/projects/${projectId}/scripts/${scriptId}/viewer?line=${shot.line_id}&page=${shot.page_number}`}
+            className="sl-btn-edit"
+            onClick={(e) => e.stopPropagation()}
+            title="Xem trong Script Lining"
+          >→</Link>
+        )}
       </td>
     </tr>
   )
