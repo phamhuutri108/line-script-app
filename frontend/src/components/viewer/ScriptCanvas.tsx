@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState, forwardRef, useImperativeHandle } from 'react'
-import { Canvas, Line, Path, Group, Circle, IText } from 'fabric'
+import { Canvas, Line, Path, Group, Circle, IText, Shadow } from 'fabric'
 import { useAuthStore } from '../../stores/authStore'
 import { api } from '../../api/client'
 import { scenesApi, type SceneMarker } from '../../api/scenes'
@@ -457,11 +457,11 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     for (const seg of completedSegs) {
       if (seg.type === 'zigzag') {
         objects.push(new Path(zigzagPath(startX, lastY, seg.yEndPx), {
-          stroke: color, strokeWidth: STROKE_WIDTH, fill: '', selectable: false, evented: false, opacity: 0.65,
+          stroke: color, strokeWidth: STROKE_WIDTH, fill: '', selectable: false, evented: false, strokeDashArray: [6, 4], opacity: 0.65,
         }))
       } else {
         objects.push(new Line([startX, lastY, startX, seg.yEndPx], {
-          stroke: color, strokeWidth: STROKE_WIDTH, selectable: false, evented: false, opacity: 0.65,
+          stroke: color, strokeWidth: STROKE_WIDTH, selectable: false, evented: false, strokeDashArray: [6, 4], opacity: 0.65,
         }))
       }
       // Transition bracket
@@ -475,11 +475,11 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     if (Math.abs(currentY - lastY) > 2) {
       if (currentSegType === 'zigzag') {
         objects.push(new Path(zigzagPath(startX, lastY, currentY), {
-          stroke: color, strokeWidth: STROKE_WIDTH, fill: '', selectable: false, evented: false, opacity: 0.65,
+          stroke: color, strokeWidth: STROKE_WIDTH, fill: '', selectable: false, evented: false, strokeDashArray: [6, 4], opacity: 0.65,
         }))
       } else {
         objects.push(new Line([startX, lastY, startX, currentY], {
-          stroke: color, strokeWidth: STROKE_WIDTH, selectable: false, evented: false, opacity: 0.65,
+          stroke: color, strokeWidth: STROKE_WIDTH, selectable: false, evented: false, strokeDashArray: [6, 4], opacity: 0.65,
         }))
       }
     }
@@ -925,20 +925,43 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     function onSelCreated(e: { selected?: unknown[] }) {
       if (e.selected?.[0]) {
         showHandles(e.selected[0])
-        const o = e.selected[0] as { data?: { type?: string; id?: string }; getCenterPoint?: () => { x: number } }
-        if (o?.data?.type === 'line') dragStartXRef.current = (o.getCenterPoint?.()?.x ?? 0) / width
+        const o = e.selected[0] as { data?: { type?: string; id?: string; color?: string }; getCenterPoint?: () => { x: number }; set: (opts: any) => void }
+        if (o?.data?.type === 'line') {
+          dragStartXRef.current = (o.getCenterPoint?.()?.x ?? 0) / width
+          o.set({ shadow: new Shadow({ color: o.data.color || '#007AFF', blur: 8, offsetX: 0, offsetY: 0 }) })
+          if ((o as any).bringToFront) (o as any).bringToFront()
+        }
         if (o?.data?.type === 'scene') setSelectedMarkerId(o.data.id ?? null)
       }
     }
-    function onSelUpdated(e: { selected?: unknown[] }) {
+    function onSelUpdated(e: { selected?: unknown[]; deselected?: unknown[] }) {
+      if (e.deselected?.[0]) {
+        const prev = e.deselected[0] as { data?: { type?: string }; set: (opts: any) => void }
+        if (prev?.data?.type === 'line') prev.set({ shadow: null })
+      }
       if (e.selected?.[0]) {
         showHandles(e.selected[0])
-        const o = e.selected[0] as { data?: { type?: string; id?: string } }
+        const o = e.selected[0] as { data?: { type?: string; id?: string; color?: string }; set: (opts: any) => void }
+        if (o?.data?.type === 'line') {
+          o.set({ shadow: new Shadow({ color: o.data.color || '#007AFF', blur: 8, offsetX: 0, offsetY: 0 }) })
+          if ((o as any).bringToFront) (o as any).bringToFront()
+        }
         if (o?.data?.type === 'scene') setSelectedMarkerId(o.data.id ?? null)
       }
     }
-    function onSelCleared() {
+    function onSelCleared(e: { deselected?: unknown[] }) {
       clearHandles()
+      if (e.deselected && e.deselected.length > 0) {
+        e.deselected.forEach(obj => {
+          const o = obj as { data?: { type?: string }; set: (opts: any) => void }
+          if (o?.data?.type === 'line') o.set({ shadow: null })
+        })
+      }
+      // Fallback: clear all line shadows just in case
+      canvas!.getObjects().forEach(obj => {
+        const o = obj as { data?: { type?: string }; shadow?: any; set: (opts: any) => void }
+        if (o?.data?.type === 'line' && o.shadow) o.set({ shadow: null })
+      })
       draggingXRef.current = {}
       setDraggingX({})
       draggingMarkerRef.current = {}
@@ -1322,46 +1345,51 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
         })}
       </div>
 
-      {/* T/M badges (rotated 45°, next to label box) + end grip */}
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      {/* T/M badges (combined text next to label box) + end grip */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 30 }}>
         {labels.map((label) => {
           const x = draggingX[label.lineId] ?? label.x
           const yTop = draggingY[label.lineId]?.yTop ?? label.yTop
           const yBottom = draggingY[label.lineId]?.yBottom ?? label.yBottom
           const typeActive = activeBadge?.lineId === label.lineId && activeBadge.field === 'shot_type'
-          const movActive = activeBadge?.lineId === label.lineId && activeBadge.field === 'movement'
           return (
             <div key={label.lineId}>
-              {/* T/M rotated -45° to the right of label box */}
-              <div style={{ position: 'absolute', left: x + 6, top: yTop - 4, pointerEvents: 'auto' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, transform: 'rotate(-45deg)', transformOrigin: '0 0' }}>
-                  <button
-                    className="shot-badge-rotated"
-                    style={{ borderColor: label.color, color: typeActive ? '#fff' : label.color, background: typeActive ? label.color : '#fff' }}
-                    onClick={(e) => { e.stopPropagation(); setActiveBadge(typeActive ? null : { lineId: label.lineId, field: 'shot_type' }) }}
-                  >{label.shotType || 'T'}</button>
-                  <button
-                    className="shot-badge-rotated"
-                    style={{ borderColor: label.color, color: movActive ? '#fff' : label.color, background: movActive ? label.color : '#fff' }}
-                    onClick={(e) => { e.stopPropagation(); setActiveBadge(movActive ? null : { lineId: label.lineId, field: 'movement' }) }}
-                  >{label.movement ? label.movement.slice(0, 3) : 'M'}</button>
+              {/* T/M combined text, rotated -70° above the label box */}
+              <div style={{ position: 'absolute', left: x + 6, top: yTop - 12, pointerEvents: 'auto' }}>
+                <div
+                  style={{
+                    transform: 'rotate(-70deg) translateY(-4px)',
+                    transformOrigin: 'bottom left',
+                    color: label.color,
+                    fontSize: '12px',
+                    fontWeight: 'normal',
+                    whiteSpace: 'nowrap',
+                    cursor: 'pointer',
+                    userSelect: 'none'
+                  }}
+                  onClick={(e) => { e.stopPropagation(); setActiveBadge(typeActive ? null : { lineId: label.lineId, field: 'shot_type' }) }}
+                >
+                  {label.shotType || 'T'} / {label.movement || 'M'}
                 </div>
                 {typeActive && (
-                  <div className="badge-popup" style={{ position: 'absolute', top: 0, left: 28, transform: 'none' }}>
-                    {SHOT_TYPE_OPTIONS.map((opt) => (
-                      <button key={opt || '__empty__'} className={`badge-popup-item${opt === label.shotType ? ' active' : ''}`}
-                        onClick={(e) => { e.stopPropagation(); handleBadgeUpdate(label.lineId, 'shot_type', opt) }}
-                      >{opt || '—'}</button>
-                    ))}
-                  </div>
-                )}
-                {movActive && (
-                  <div className="badge-popup" style={{ position: 'absolute', top: 22, left: 28, transform: 'none' }}>
-                    {MOVEMENT_OPTIONS.map((opt) => (
-                      <button key={opt || '__empty__'} className={`badge-popup-item${opt === label.movement ? ' active' : ''}`}
-                        onClick={(e) => { e.stopPropagation(); handleBadgeUpdate(label.lineId, 'movement', opt) }}
-                      >{opt || '—'}</button>
-                    ))}
+                  <div className="badge-popup combined-popup" style={{ position: 'absolute', top: -30, left: 20, transform: 'none', display: 'flex', flexDirection: 'row', gap: '8px', minWidth: '180px' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px', paddingLeft: '4px', fontWeight: 'bold' }}>Type</div>
+                      {SHOT_TYPE_OPTIONS.map((opt) => (
+                        <button key={opt || '__empty__'} className={`badge-popup-item${opt === label.shotType ? ' active' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); handleBadgeUpdate(label.lineId, 'shot_type', opt) }}
+                        >{opt || '—'}</button>
+                      ))}
+                    </div>
+                    <div style={{ width: '1px', background: '#eee' }} />
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px', paddingLeft: '4px', fontWeight: 'bold' }}>Movement</div>
+                      {MOVEMENT_OPTIONS.map((opt) => (
+                        <button key={opt || '__empty__'} className={`badge-popup-item${opt === label.movement ? ' active' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); handleBadgeUpdate(label.lineId, 'movement', opt) }}
+                        >{opt || '—'}</button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1384,7 +1412,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
       </div>
 
       {/* Control nodes overlay — active line (y_start, y_end, break points) */}
-      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 30 }}>
         {selectedLineId && labels.filter((l) => l.lineId === selectedLineId).map((label) => {
           const line = linesRef.current.find((l) => l.id === selectedLineId)
           if (!line) return null
@@ -1393,7 +1421,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
           const yBottom = draggingY[selectedLineId]?.yBottom ?? label.yBottom
           const segs = parseSegments(line)
           const breakYs = (draggingBreak[selectedLineId] ?? segs.slice(0, -1).map((s) => s.y_end)).map((yn) => yn * height)
-          const node = { width: 10, height: 10, borderRadius: '50%', background: '#fff', border: '2px solid #007AFF', transform: 'translate(-50%, -50%)' }
+          const node = { width: 10, height: 10, borderRadius: '50%', background: '#fff', border: `2px solid ${line.color}`, transform: 'translate(-50%, -50%)' }
           const hitbox = (yPx: number) => ({ position: 'absolute' as const, left: x, top: yPx, width: 32, height: 32, borderRadius: '50%', transform: 'translate(-50%, -50%)', cursor: 'ns-resize', pointerEvents: 'auto' as const, background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' })
           return (
             <div key={label.lineId}>
@@ -1405,7 +1433,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
               </div>
               {breakYs.map((yPx, idx) => (
                 <div key={idx} style={hitbox(yPx)} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); breakDragRef.current = { lineId: selectedLineId, segIdx: idx, startClientY: e.clientY, origYNorm: segs[idx].y_end, latestYNorm: segs[idx].y_end } }}>
-                  <div style={{ ...node, border: '2px solid #007AFF', background: '#e8f0fe' }} />
+                  <div style={{ ...node, border: `2px solid ${line.color}`, background: '#e8f0fe' }} />
                 </div>
               ))}
             </div>
