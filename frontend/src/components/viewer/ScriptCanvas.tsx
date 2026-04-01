@@ -103,6 +103,7 @@ interface Props {
   onExtractSceneName?: (yNorm: number) => Promise<string>
   onUndoStateChange?: (canUndo: boolean, canRedo: boolean) => void
   onShotUpdated?: (shot: Shot) => void
+  onLabelsChanged?: (map: Record<string, string>) => void
   highlightLineId?: string | null
 }
 
@@ -173,7 +174,7 @@ function computeLabels(
 
 export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   width, height, scriptId, pageNumber, toolState, shots,
-  onLineCreated, onLineDeleted, onSceneMarkersChanged, onExtractSceneName, onUndoStateChange, onShotUpdated, highlightLineId,
+  onLineCreated, onLineDeleted, onSceneMarkersChanged, onExtractSceneName, onUndoStateChange, onShotUpdated, onLabelsChanged, highlightLineId,
 }, ref) {
   const canvasRef         = useRef<HTMLCanvasElement>(null)
   const fabricRef         = useRef<Canvas | null>(null)
@@ -188,6 +189,7 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   const draggingMarkerRef = useRef<Record<string, number>>({})
   const linesRef          = useRef<LineRecord[]>([])
   const yDragRef          = useRef<{ lineId: string; handle: 'start' | 'end'; startClientY: number; origYNorm: number; latestYNorm: number } | null>(null)
+  const breakDragRef      = useRef<{ lineId: string; segIdx: number; startClientY: number; origYNorm: number; latestYNorm: number } | null>(null)
   const { token } = useAuthStore()
 
   const [lines, setLines] = useState<LineRecord[]>([])
@@ -197,12 +199,24 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
   const [draggingX, setDraggingX] = useState<Record<string, number>>({})
   const [draggingMarker, setDraggingMarker] = useState<Record<string, number>>({})
   const [draggingY, setDraggingY] = useState<Record<string, { yTop: number; yBottom: number }>>({})
+  const [draggingBreak, setDraggingBreak] = useState<Record<string, number[]>>({})
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null)
   const [activeBadge, setActiveBadge] = useState<{ lineId: string; field: 'shot_type' | 'movement' } | null>(null)
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null)
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null)
 
   linesRef.current = lines
   const labels = computeLabels(lines, markers, shots, width, height)
+
+  // Emit label map to parent whenever labels change
+  useEffect(() => {
+    const map: Record<string, string> = {}
+    labels.forEach((l) => {
+      map[l.lineId] = l.sceneNum > 0 ? `${l.sceneNum}/${l.shotNum}` : `${l.shotNum}`
+    })
+    onLabelsChanged?.(map)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lines, markers, shots])
 
   // ── Undo/Redo helpers ─────────────────────────────────────────────────────
 
@@ -1118,6 +1132,83 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
     }
   }, [height, width, token])
 
+  // ── Track selected line via Fabric events ────────────────────────────────
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const canvas = fabricRef.current
+    if (!canvas) return
+    function onSelected(e: { selected?: unknown[] }) {
+      const obj = (e.selected?.[0]) as { data?: { type?: string; id?: string } } | undefined
+      if (obj?.data?.type === 'line' && obj.data.id) setSelectedLineId(obj.data.id)
+      else setSelectedLineId(null)
+    }
+    function onCleared() { setSelectedLineId(null) }
+    canvas.on('selection:created', onSelected as (e: object) => void)
+    canvas.on('selection:updated', onSelected as (e: object) => void)
+    canvas.on('selection:cleared', onCleared)
+    return () => {
+      canvas.off('selection:created', onSelected as (e: object) => void)
+      canvas.off('selection:updated', onSelected as (e: object) => void)
+      canvas.off('selection:cleared', onCleared)
+    }
+  })
+
+  // ── Break point drag ──────────────────────────────────────────────────────
+
+  useEffect(() => {
+    function onMove(e: PointerEvent) {
+      const drag = breakDragRef.current
+      if (!drag) return
+      const dy = e.clientY - drag.startClientY
+      const newYNorm = Math.max(0.01, Math.min(0.99, drag.origYNorm + dy / height))
+      drag.latestYNorm = newYNorm
+      setDraggingBreak((prev) => {
+        const line = linesRef.current.find((l) => l.id === drag.lineId)
+        if (!line) return prev
+        const segs = parseSegments(line)
+        const breaks = segs.slice(0, -1).map((s) => s.y_end)
+        breaks[drag.segIdx] = newYNorm
+        return { ...prev, [drag.lineId]: breaks }
+      })
+    }
+    function onUp() {
+      const drag = breakDragRef.current
+      if (!drag || !token) { breakDragRef.current = null; return }
+      const { lineId, segIdx, latestYNorm } = drag
+      breakDragRef.current = null
+      const line = linesRef.current.find((l) => l.id === lineId)
+      if (!line) return
+      const segs = parseSegments(line)
+      // Clamp to neighbours
+      const minY = segIdx === 0 ? line.y_start + 0.01 : segs[segIdx - 1].y_end + 0.01
+      const maxY = segIdx >= segs.length - 2 ? line.y_end - 0.01 : segs[segIdx + 2].y_start - 0.01
+      const clamped = Math.max(minY, Math.min(maxY, latestYNorm))
+      segs[segIdx] = { ...segs[segIdx], y_end: clamped }
+      segs[segIdx + 1] = { ...segs[segIdx + 1], y_start: clamped }
+      const newSegmentsJson = JSON.stringify(segs)
+      api.patch<{ line: LineRecord }>(`/lines/${lineId}`, { segmentsJson: newSegmentsJson }, token)
+        .then((res) => {
+          setLines((prev) => prev.map((l) => l.id === lineId ? res.line : l))
+          setDraggingBreak((prev) => { const n = { ...prev }; delete n[lineId]; return n })
+          const canvas = fabricRef.current
+          if (canvas) {
+            const obj = canvas.getObjects().find((o) => (o as { data?: { id?: string } }).data?.id === lineId)
+            if (obj) canvas.remove(obj)
+            addLineGroupToCanvas(canvas, res.line, width, height)
+            canvas.requestRenderAll()
+          }
+        })
+        .catch(() => { setDraggingBreak((prev) => { const n = { ...prev }; delete n[lineId]; return n }) })
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [height, width, token])
+
   // ── Scene marker rename ───────────────────────────────────────────────────
 
   function handleMarkerRename(id: string, name: string) {
@@ -1231,43 +1322,32 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
         })}
       </div>
 
-      {/* Shot badges overlay (Type + Movement near end bracket) */}
+      {/* T/M badges (rotated 45°, next to label box) + end grip */}
       <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
         {labels.map((label) => {
           const x = draggingX[label.lineId] ?? label.x
+          const yTop = draggingY[label.lineId]?.yTop ?? label.yTop
           const yBottom = draggingY[label.lineId]?.yBottom ?? label.yBottom
           const typeActive = activeBadge?.lineId === label.lineId && activeBadge.field === 'shot_type'
           const movActive = activeBadge?.lineId === label.lineId && activeBadge.field === 'movement'
           return (
-            <div key={label.lineId} style={{ position: 'absolute', left: x, top: yBottom, transform: 'translateX(-50%)' }}>
-              {/* End-bracket drag grip */}
-              <div
-                style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', padding: '3px 6px', cursor: 'ns-resize', pointerEvents: 'auto' }}
-                onPointerDown={(e) => {
-                  e.stopPropagation()
-                  e.preventDefault()
-                  const line = linesRef.current.find((l) => l.id === label.lineId)
-                  if (!line) return
-                  yDragRef.current = { lineId: label.lineId, handle: 'end', startClientY: e.clientY, origYNorm: line.y_end, latestYNorm: line.y_end }
-                }}
-              >
-                <div style={{ width: 14, height: 1.5, background: label.color, borderRadius: 1 }} />
-                <div style={{ width: 14, height: 1.5, background: label.color, borderRadius: 1 }} />
-              </div>
-            <div
-              className="shot-badges-group"
-              style={{ left: 'unset', top: 'unset', position: 'relative', transform: 'none' }}
-            >
-              <div style={{ position: 'relative' }}>
-                <button
-                  className="shot-badge"
-                  style={{ borderColor: label.color, color: typeActive ? 'white' : label.color, background: typeActive ? label.color : 'white' }}
-                  onClick={(e) => { e.stopPropagation(); setActiveBadge(typeActive ? null : { lineId: label.lineId, field: 'shot_type' }) }}
-                >
-                  {label.shotType || 'T'}
-                </button>
+            <div key={label.lineId}>
+              {/* T/M rotated -45° to the right of label box */}
+              <div style={{ position: 'absolute', left: x + 6, top: yTop - 4, pointerEvents: 'auto' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 3, transform: 'rotate(-45deg)', transformOrigin: '0 0' }}>
+                  <button
+                    className="shot-badge-rotated"
+                    style={{ borderColor: label.color, color: typeActive ? '#fff' : label.color, background: typeActive ? label.color : '#fff' }}
+                    onClick={(e) => { e.stopPropagation(); setActiveBadge(typeActive ? null : { lineId: label.lineId, field: 'shot_type' }) }}
+                  >{label.shotType || 'T'}</button>
+                  <button
+                    className="shot-badge-rotated"
+                    style={{ borderColor: label.color, color: movActive ? '#fff' : label.color, background: movActive ? label.color : '#fff' }}
+                    onClick={(e) => { e.stopPropagation(); setActiveBadge(movActive ? null : { lineId: label.lineId, field: 'movement' }) }}
+                  >{label.movement ? label.movement.slice(0, 3) : 'M'}</button>
+                </div>
                 {typeActive && (
-                  <div className="badge-popup">
+                  <div className="badge-popup" style={{ position: 'absolute', top: 0, left: 28, transform: 'none' }}>
                     {SHOT_TYPE_OPTIONS.map((opt) => (
                       <button key={opt || '__empty__'} className={`badge-popup-item${opt === label.shotType ? ' active' : ''}`}
                         onClick={(e) => { e.stopPropagation(); handleBadgeUpdate(label.lineId, 'shot_type', opt) }}
@@ -1275,17 +1355,8 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
                     ))}
                   </div>
                 )}
-              </div>
-              <div style={{ position: 'relative' }}>
-                <button
-                  className="shot-badge"
-                  style={{ borderColor: label.color, color: movActive ? 'white' : label.color, background: movActive ? label.color : 'white' }}
-                  onClick={(e) => { e.stopPropagation(); setActiveBadge(movActive ? null : { lineId: label.lineId, field: 'movement' }) }}
-                >
-                  {label.movement ? label.movement.slice(0, 3) : 'M'}
-                </button>
                 {movActive && (
-                  <div className="badge-popup">
+                  <div className="badge-popup" style={{ position: 'absolute', top: 22, left: 28, transform: 'none' }}>
                     {MOVEMENT_OPTIONS.map((opt) => (
                       <button key={opt || '__empty__'} className={`badge-popup-item${opt === label.movement ? ' active' : ''}`}
                         onClick={(e) => { e.stopPropagation(); handleBadgeUpdate(label.lineId, 'movement', opt) }}
@@ -1294,7 +1365,49 @@ export default forwardRef<ScriptCanvasHandle, Props>(function ScriptCanvas({
                   </div>
                 )}
               </div>
+              {/* End-bracket drag grip */}
+              <div
+                style={{ position: 'absolute', left: x, top: yBottom, transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', padding: '3px 6px', cursor: 'ns-resize', pointerEvents: 'auto' }}
+                onPointerDown={(e) => {
+                  e.stopPropagation(); e.preventDefault()
+                  const line = linesRef.current.find((l) => l.id === label.lineId)
+                  if (!line) return
+                  yDragRef.current = { lineId: label.lineId, handle: 'end', startClientY: e.clientY, origYNorm: line.y_end, latestYNorm: line.y_end }
+                }}
+              >
+                <div style={{ width: 14, height: 1.5, background: label.color, borderRadius: 1 }} />
+                <div style={{ width: 14, height: 1.5, background: label.color, borderRadius: 1 }} />
+              </div>
             </div>
+          )
+        })}
+      </div>
+
+      {/* Control nodes overlay — active line (y_start, y_end, break points) */}
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+        {selectedLineId && labels.filter((l) => l.lineId === selectedLineId).map((label) => {
+          const line = linesRef.current.find((l) => l.id === selectedLineId)
+          if (!line) return null
+          const x = draggingX[selectedLineId] ?? label.x
+          const yTop = draggingY[selectedLineId]?.yTop ?? label.yTop
+          const yBottom = draggingY[selectedLineId]?.yBottom ?? label.yBottom
+          const segs = parseSegments(line)
+          const breakYs = (draggingBreak[selectedLineId] ?? segs.slice(0, -1).map((s) => s.y_end)).map((yn) => yn * height)
+          const node = { width: 10, height: 10, borderRadius: '50%', background: '#fff', border: '2px solid #007AFF', transform: 'translate(-50%, -50%)' }
+          const hitbox = (yPx: number) => ({ position: 'absolute' as const, left: x, top: yPx, width: 32, height: 32, borderRadius: '50%', transform: 'translate(-50%, -50%)', cursor: 'ns-resize', pointerEvents: 'auto' as const, background: 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center' })
+          return (
+            <div key={label.lineId}>
+              <div style={hitbox(yTop)} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); yDragRef.current = { lineId: selectedLineId, handle: 'start', startClientY: e.clientY, origYNorm: line.y_start, latestYNorm: line.y_start } }}>
+                <div style={node} />
+              </div>
+              <div style={hitbox(yBottom)} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); yDragRef.current = { lineId: selectedLineId, handle: 'end', startClientY: e.clientY, origYNorm: line.y_end, latestYNorm: line.y_end } }}>
+                <div style={node} />
+              </div>
+              {breakYs.map((yPx, idx) => (
+                <div key={idx} style={hitbox(yPx)} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); breakDragRef.current = { lineId: selectedLineId, segIdx: idx, startClientY: e.clientY, origYNorm: segs[idx].y_end, latestYNorm: segs[idx].y_end } }}>
+                  <div style={{ ...node, border: '2px solid #007AFF', background: '#e8f0fe' }} />
+                </div>
+              ))}
             </div>
           )
         })}

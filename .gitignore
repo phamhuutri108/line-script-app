@@ -25,6 +25,9 @@ build/
 
 # Editor
 .vscode/settings.json
+
+# Claude Code local settings
+.claude/settings.json
 .idea/
 *.suo
 *.ntvs*

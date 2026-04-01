@@ -46,6 +46,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId, in
   const [highlightLineId, setHighlightLineId] = useState<string | null>(null)
   const [canUndo, setCanUndo] = useState(false)
   const [canRedo, setCanRedo] = useState(false)
+  const [shotLabelMap, setShotLabelMap] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!token) return
@@ -336,6 +337,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId, in
                 onExtractSceneName={extractSceneNameAt}
                 onUndoStateChange={(u, r) => { setCanUndo(u); setCanRedo(r) }}
                 onShotUpdated={handleShotUpdated}
+                onLabelsChanged={setShotLabelMap}
                 highlightLineId={highlightLineId}
               />
             )}
@@ -346,6 +348,7 @@ export default function PDFViewer({ pdfData, scriptId, scriptName, projectId, in
           scriptId={scriptId}
           projectId={projectId}
           highlightLineId={highlightLineId}
+          shotLabelMap={shotLabelMap}
           onShotClick={handleShotClick}
           onJumpToLine={handleJumpToLine}
           onShotUpdated={handleShotUpdated}

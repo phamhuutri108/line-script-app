@@ -9,6 +9,7 @@ interface Props {
   scriptId: string
   projectId: string
   highlightLineId?: string | null
+  shotLabelMap?: Record<string, string>
   onShotClick?: (shot: Shot) => void
   onJumpToLine?: (lineId: string, pageNum: number) => void
   onShotUpdated?: (shot: Shot) => void
@@ -34,7 +35,7 @@ function extractDayNight(shot: Shot): string {
   return m ? m[1].toUpperCase() : ''
 }
 
-export default function ShotlistPanel({ scriptId, projectId, highlightLineId, onShotClick, onJumpToLine, onShotUpdated, refreshTrigger }: Props) {
+export default function ShotlistPanel({ scriptId, projectId, highlightLineId, shotLabelMap, onShotClick, onJumpToLine, onShotUpdated, refreshTrigger }: Props) {
   const { token } = useAuthStore()
   const [shots, setShots] = useState<Shot[]>([])
   const [loading, setLoading] = useState(true)
@@ -117,13 +118,13 @@ export default function ShotlistPanel({ scriptId, projectId, highlightLineId, on
               shot={shot}
               isHighlighted={highlightLineId === shot.line_id}
               isEditing={editingId === shot.id}
+              shotLabel={shot.line_id ? shotLabelMap?.[shot.line_id] : undefined}
               onEdit={() => setEditingId(shot.id)}
               onClose={() => setEditingId(null)}
               onUpdate={(data) => handleUpdate(shot.id, data)}
               onDelete={() => handleDelete(shot.id)}
               onClick={() => onShotClick?.(shot)}
               onJumpToLine={shot.line_id && shot.page_number ? () => onJumpToLine?.(shot.line_id!, shot.page_number!) : undefined}
-              onShotChanged={(updated) => setShots((prev) => prev.map((s) => s.id === updated.id ? updated : s))}
               projectId={projectId}
               scriptId={scriptId}
             />
@@ -138,48 +139,20 @@ interface RowProps {
   shot: Shot
   isHighlighted: boolean
   isEditing: boolean
+  shotLabel?: string
   onEdit: () => void
   onClose: () => void
   onUpdate: (data: ShotUpdate) => void
   onDelete: () => void
   onClick: () => void
   onJumpToLine?: () => void
-  onShotChanged: (updated: Shot) => void
   projectId: string
   scriptId: string
 }
 
-function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, onDelete, onClick, onJumpToLine, onShotChanged, projectId, scriptId }: RowProps) {
-  const { token } = useAuthStore()
+function ShotRow({ shot, isHighlighted, isEditing, shotLabel, onEdit, onClose, onUpdate, onDelete, onClick, onJumpToLine, projectId, scriptId }: RowProps) {
   const navigate = useNavigate()
   const [draft, setDraft] = useState<ShotUpdate>({})
-  const [uploading, setUploading] = useState(false)
-  const [driveError, setDriveError] = useState<string | null>(null)
-
-  async function handleStoryboardUpload(file: File) {
-    setUploading(true)
-    setDriveError(null)
-    try {
-      const res = await shotsApi.uploadStoryboard(token!, shot.id, file)
-      onShotChanged({ ...shot, storyboard_drive_id: res.driveFileId, storyboard_view_url: res.viewUrl })
-    } catch (err: unknown) {
-      const e = err as { message?: string; code?: string }
-      if (e.code === 'GOOGLE_NOT_CONNECTED') {
-        setDriveError('GOOGLE_NOT_CONNECTED')
-      } else {
-        setDriveError(e.message ?? 'Upload failed')
-      }
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  async function handleStoryboardDelete() {
-    const ok = await showConfirm({ title: 'Xóa storyboard', message: 'Ảnh storyboard này sẽ bị xóa.', confirmLabel: 'Xóa' })
-    if (!ok) return
-    await shotsApi.deleteStoryboard(token!, shot.id)
-    onShotChanged({ ...shot, storyboard_drive_id: null, storyboard_view_url: null })
-  }
 
   const hasChanges = Object.keys(draft).length > 0
 
@@ -227,7 +200,7 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: '0.78rem', fontWeight: 500, color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {shot.scene_number ? `Cảnh ${shot.scene_number}` : `Shot ${shot.shot_number}`}
+            {shotLabel ?? (shot.scene_number ? `Cảnh ${shot.scene_number}` : `Shot ${shot.shot_number}`)}
             {shot.location ? ` — ${shot.location}` : ''}
           </div>
           <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
@@ -261,7 +234,6 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
       {/* Expanded editor */}
       {isEditing && (
         <div style={{ padding: '0 0.75rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <ShotField label="Scene #" value={val('scene_number')} onChange={(v) => set('scene_number', v)} />
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
             <ShotSelect label="INT/EXT" options={INT_EXT_OPTIONS} value={val('int_ext')} onChange={(v) => set('int_ext', v)} />
             <ShotSelect label="Day/Night" options={DAY_NIGHT_OPTIONS} value={val('day_night')} onChange={(v) => set('day_night', v)} />
@@ -292,37 +264,6 @@ function ShotRow({ shot, isHighlighted, isEditing, onEdit, onClose, onUpdate, on
               <div className="auto-description-text">{shot.description}</div>
             </div>
           )}
-
-          {/* Storyboard */}
-          <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '0.5rem', marginTop: '0.25rem' }}>
-            <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', marginBottom: '0.4rem' }}>Storyboard</div>
-            {driveError === 'GOOGLE_NOT_CONNECTED' ? (
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-warning, #f59e0b)', background: 'rgba(245,158,11,0.08)', borderRadius: '6px', padding: '0.5rem 0.6rem' }}>
-                Google Drive chưa kết nối.{' '}
-                <a href="/settings" style={{ color: 'var(--color-primary)', textDecoration: 'underline' }}>Kết nối trong Settings</a>
-              </div>
-            ) : driveError ? (
-              <div style={{ fontSize: '0.75rem', color: 'var(--color-danger, #ef4444)' }}>{driveError}</div>
-            ) : null}
-            {shot.storyboard_view_url ? (
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                <img src={shot.storyboard_view_url} alt="storyboard" style={{ height: 54, borderRadius: '4px', border: '1px solid var(--color-border)', objectFit: 'cover' }} />
-                <button className="btn btn-danger btn-sm" onClick={handleStoryboardDelete} style={{ fontSize: '0.7rem' }}>Xóa</button>
-              </div>
-            ) : (
-              <label style={{ display: 'inline-block', cursor: 'pointer' }}>
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp,image/gif"
-                  style={{ display: 'none' }}
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleStoryboardUpload(f) }}
-                />
-                <span className="btn btn-sm" style={{ fontSize: '0.75rem', opacity: uploading ? 0.6 : 1, pointerEvents: uploading ? 'none' : 'auto' }}>
-                  {uploading ? 'Đang upload…' : '+ Thêm ảnh'}
-                </span>
-              </label>
-            )}
-          </div>
 
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
             <button className="btn btn-primary btn-sm" onClick={handleSave} style={{ flex: 1 }}>
